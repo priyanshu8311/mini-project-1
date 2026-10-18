@@ -4,7 +4,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from backend.src.domain.inventory.models import LocationType
+from backend.src.domain.inventory.models import LocationType, TransactionType
 
 
 class PaginationMeta(BaseModel):
@@ -140,3 +140,74 @@ class LocationResponse(BaseModel):
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+# --- Inventory Levels & Transactions (Ledger) ---
+class InventoryLevelResponse(BaseModel):
+    """Snapshot of stock on hand, reserved, and available per SKU and location."""
+
+    id: UUID
+    tenant_id: UUID
+    sku_id: UUID
+    location_id: UUID
+    on_hand: int
+    reserved: int
+    available: int
+    reorder_point: int
+    reorder_quantity: int
+    version: int
+    created_at: datetime
+    sku_code: str | None = None
+    product_name: str | None = None
+    location_name: str | None = None
+    location_type: str | None = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class InventoryTransactionCreate(BaseModel):
+    """Payload to record an atomic inventory ledger transaction."""
+
+    transaction_type: TransactionType
+    sku_id: UUID
+    location_id: UUID
+    target_location_id: UUID | None = Field(
+        default=None,
+        description="Required destination location when transaction_type is Transfer",
+    )
+    quantity_change: int = Field(
+        ...,
+        description="Stock adjustment quantity. Must be non-zero.",
+    )
+    reference_id: str | None = Field(
+        default=None,
+        max_length=100,
+        description="Reference identifier e.g. PO #, Sales Order #, RMA #",
+    )
+    reason: str | None = Field(
+        default=None,
+        max_length=255,
+        description="Audit memo / reason for stock modification",
+    )
+
+
+class InventoryTransactionResponse(BaseModel):
+    """Immutable ledger record representing an inventory adjustment."""
+
+    id: UUID
+    tenant_id: UUID
+    sku_id: UUID
+    location_id: UUID
+    user_id: UUID
+    transaction_type: str
+    quantity_change: int
+    reference_id: str | None
+    reason: str | None
+    created_at: datetime
+    sku_code: str | None = None
+    product_name: str | None = None
+    location_name: str | None = None
+    user_email: str | None = None
+
+    model_config = ConfigDict(from_attributes=True)
+

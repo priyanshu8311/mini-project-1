@@ -3,7 +3,12 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from backend.src.core.errors import ConflictException, NotFoundException, UnauthorizedException
+from backend.src.core.errors import (
+    ConflictException,
+    NotFoundException,
+    UnauthorizedException,
+    ValidationException,
+)
 from backend.src.core.security import hash_password, verify_password
 from backend.src.domain.users.models import Tenant, User, UserRole
 
@@ -28,6 +33,39 @@ class UserService:
         if not tenant:
             raise NotFoundException("Tenant", tenant_id)
         return tenant
+
+    @staticmethod
+    async def register_organization(
+        db: AsyncSession,
+        organization_name: str,
+        email: str,
+        password: str,
+    ) -> tuple[Tenant, User]:
+        """Atomically register a new tenant organization and its initial administrator."""
+        # Ensure email is not already registered across tenants to prevent credential collision
+        existing = await UserService.get_user_by_email(db, email=email)
+        if existing:
+            raise ConflictException(
+                f"An account with email '{email}' already exists. "
+                "Please sign in or use another email."
+            )
+
+        tenant = Tenant(name=organization_name.strip())
+        db.add(tenant)
+        await db.flush()
+
+        user = User(
+            tenant_id=tenant.id,
+            email=email.lower().strip(),
+            password_hash=hash_password(password),
+            role=UserRole.ADMIN.value,
+            is_active=True,
+        )
+        db.add(user)
+        await db.flush()
+        await db.refresh(tenant)
+        await db.refresh(user)
+        return tenant, user
 
     @staticmethod
     async def create_user(
@@ -61,6 +99,19 @@ class UserService:
         return user
 
     @staticmethod
+    async def list_users_by_tenant(
+        db: AsyncSession,
+        tenant_id: UUID,
+    ) -> list[User]:
+        """List all users within a tenant organization."""
+        result = await db.execute(
+            select(User)
+            .where(User.tenant_id == tenant_id)
+            .order_by(User.created_at.desc())
+        )
+        return list(result.scalars().all())
+
+    @staticmethod
     async def get_user_by_email(
         db: AsyncSession,
         email: str,
@@ -90,6 +141,24 @@ class UserService:
         return user
 
     @staticmethod
+    async def update_user_status(
+        db: AsyncSession,
+        user_id: UUID,
+        tenant_id: UUID,
+        is_active: bool,
+        actor_user_id: UUID,
+    ) -> User:
+        """Activate or deactivate a user account within the tenant."""
+        if user_id == actor_user_id and not is_active:
+            raise ValidationException("Administrators cannot deactivate their own account.")
+
+        user = await UserService.get_user_by_id(db, user_id=user_id, tenant_id=tenant_id)
+        user.is_active = is_active
+        await db.flush()
+        await db.refresh(user)
+        return user
+
+    @staticmethod
     async def authenticate_user(
         db: AsyncSession,
         email: str,
@@ -107,3 +176,4 @@ class UserService:
             )
 
         return user
+

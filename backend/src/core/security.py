@@ -1,3 +1,4 @@
+import re
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -6,6 +7,25 @@ import jwt
 
 from backend.src.core.config import settings
 from backend.src.core.errors import UnauthorizedException
+
+
+def validate_password_strength(password: str) -> None:
+    """Validate password complexity requirements.
+
+    Requirements:
+    - Minimum 8 characters
+    - At least one uppercase letter
+    - At least one lowercase letter
+    - At least one digit or special character
+    """
+    if len(password) < 8:
+        raise ValueError("Password must be at least 8 characters long.")
+    if not re.search(r"[A-Z]", password):
+        raise ValueError("Password must contain at least one uppercase letter.")
+    if not re.search(r"[a-z]", password):
+        raise ValueError("Password must contain at least one lowercase letter.")
+    if not re.search(r"[\d\W_]", password):
+        raise ValueError("Password must contain at least one digit or special character.")
 
 
 def hash_password(password: str) -> str:

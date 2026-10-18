@@ -27,10 +27,15 @@ class AppException(Exception):
 
 
 class NotFoundException(AppException):
-    def __init__(self, resource: str, identifier: Any):
+    def __init__(self, resource: str, identifier: Any = None):
+        message = (
+            f"{resource} was not found."
+            if identifier is None
+            else f"{resource} with identifier '{identifier}' was not found."
+        )
         super().__init__(
             code="NOT_FOUND",
-            message=f"{resource} with identifier '{identifier}' was not found.",
+            message=message,
             status_code=status.HTTP_404_NOT_FOUND,
         )
 

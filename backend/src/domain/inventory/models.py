@@ -1,12 +1,26 @@
 import enum
 import uuid
 from decimal import Decimal
+from typing import TYPE_CHECKING
 
-from sqlalchemy import ForeignKey, Index, Integer, Numeric, String, Text, UniqueConstraint
+from sqlalchemy import (
+    CheckConstraint,
+    Computed,
+    ForeignKey,
+    Index,
+    Integer,
+    Numeric,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from backend.src.core.database import BaseModel
+
+if TYPE_CHECKING:
+    from backend.src.domain.users.models import User
 
 
 class LocationType(enum.StrEnum):
@@ -140,3 +154,113 @@ class Location(BaseModel):
         default=LocationType.WAREHOUSE.value,
     )
     address: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+class TransactionType(enum.StrEnum):
+    """Supported inventory ledger transaction types."""
+
+    RECEIVE = "Receive"
+    SHIP = "Ship"
+    ADJUST = "Adjust"
+    TRANSFER = "Transfer"
+
+
+class InventoryLevel(BaseModel):
+    """Current stock snapshot per SKU and location."""
+
+    __tablename__ = "inventory_levels"
+
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("tenants.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    sku_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("skus.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    location_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("locations.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    on_hand: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    reserved: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    available: Mapped[int] = mapped_column(
+        Integer,
+        Computed("on_hand - reserved", persisted=True),
+    )
+    reorder_point: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    reorder_quantity: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+
+    # Relationships
+    sku: Mapped["SKU"] = relationship("SKU")
+    location: Mapped["Location"] = relationship("Location")
+
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id",
+            "sku_id",
+            "location_id",
+            name="uq_inventory_levels_tenant_sku_loc",
+        ),
+        CheckConstraint("on_hand >= 0", name="ck_inventory_levels_on_hand_non_negative"),
+        CheckConstraint("reserved >= 0", name="ck_inventory_levels_reserved_non_negative"),
+        Index("idx_inv_levels_tenant_sku", "tenant_id", "sku_id"),
+        Index("idx_inv_levels_tenant_loc", "tenant_id", "location_id"),
+    )
+
+
+class InventoryTransaction(BaseModel):
+    """Append-only audit ledger recording every inventory quantity change."""
+
+    __tablename__ = "inventory_transactions"
+
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("tenants.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    sku_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("skus.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    location_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("locations.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    transaction_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    quantity_change: Mapped[int] = mapped_column(Integer, nullable=False)
+    reference_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    reason: Mapped[str | None] = mapped_column(String(255), nullable=True)
+
+    # Relationships
+    sku: Mapped["SKU"] = relationship("SKU")
+    location: Mapped["Location"] = relationship("Location")
+    user: Mapped["User"] = relationship("User")
+
+    __table_args__ = (
+        CheckConstraint(
+            "quantity_change != 0",
+            name="ck_inventory_transactions_qty_not_zero",
+        ),
+        Index("idx_inv_tx_created", "tenant_id", "sku_id", "created_at"),
+        Index("idx_inv_tx_tenant_loc", "tenant_id", "location_id"),
+    )
+

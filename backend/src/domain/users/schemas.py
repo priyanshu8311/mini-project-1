@@ -1,8 +1,9 @@
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
+from backend.src.core.security import validate_password_strength
 from backend.src.domain.users.models import UserRole
 
 
@@ -11,6 +12,22 @@ class LoginRequest(BaseModel):
 
     email: EmailStr = Field(..., description="User email address")
     password: str = Field(..., min_length=6, description="Plaintext password")
+
+
+class RegisterRequest(BaseModel):
+    """Payload to register a new tenant organization and its initial administrator."""
+
+    organization_name: str = Field(
+        ..., min_length=2, max_length=255, description="Tenant organization name"
+    )
+    email: EmailStr = Field(..., description="Initial admin work email")
+    password: str = Field(..., description="Strong administrative password")
+
+    @field_validator("password")
+    @classmethod
+    def validate_password(cls, v: str) -> str:
+        validate_password_strength(v)
+        return v
 
 
 class UserResponse(BaseModel):
@@ -54,5 +71,31 @@ class UserCreate(BaseModel):
     """Payload for creating a new user within a tenant."""
 
     email: EmailStr
-    password: str = Field(..., min_length=8)
+    password: str = Field(..., description="User password meeting complexity requirements")
     role: UserRole = UserRole.VIEWER
+
+    @field_validator("password")
+    @classmethod
+    def validate_password(cls, v: str) -> str:
+        validate_password_strength(v)
+        return v
+
+
+class UserStatusUpdate(BaseModel):
+    """Payload for activating or deactivating a user."""
+
+    is_active: bool = Field(..., description="New active status")
+
+
+class UserListResponse(BaseModel):
+    """Paginated or listed collection of users within a tenant."""
+
+    data: list[UserResponse]
+    total: int
+
+
+class LogoutResponse(BaseModel):
+    """Acknowledgment payload for session logout."""
+
+    message: str = "Logged out successfully"
+

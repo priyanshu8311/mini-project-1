@@ -1,6 +1,6 @@
 "use client";
 
-import React, { createContext, useContext, useEffect, useState } from "react";
+import React, { createContext, useContext, useEffect, useState, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import {
   apiClient,
@@ -16,8 +16,12 @@ interface AuthContextType {
   token: string | null;
   isLoading: boolean;
   error: string | null;
+  isAuthenticated: boolean;
+  isAdmin: boolean;
+  hasRole: (roles: string[]) => boolean;
   login: (email: string, password: string) => Promise<void>;
-  logout: () => void;
+  register: (organizationName: string, email: string, password: string) => Promise<void>;
+  logout: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -77,12 +81,60 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-  const logout = (): void => {
-    clearAuthToken();
-    setTokenState(null);
-    setUser(null);
-    router.push("/login");
+  const register = async (
+    organizationName: string,
+    email: string,
+    password: string
+  ): Promise<void> => {
+    setIsLoading(true);
+    setError(null);
+    try {
+      const response = await apiClient<TokenResponse>("/auth/register", {
+        method: "POST",
+        body: JSON.stringify({
+          organization_name: organizationName,
+          email,
+          password,
+        }),
+      });
+
+      setAuthToken(response.access_token);
+      setTokenState(response.access_token);
+      setUser(response.user);
+      router.push("/");
+    } catch (err: unknown) {
+      const message =
+        err instanceof Error ? err.message : "Registration failed.";
+      setError(message);
+      throw err;
+    } finally {
+      setIsLoading(false);
+    }
   };
+
+  const logout = async (): Promise<void> => {
+    try {
+      await apiClient("/auth/logout", { method: "POST" });
+    } catch {
+      // Gracefully handle network/session invalidation edge cases
+    } finally {
+      clearAuthToken();
+      setTokenState(null);
+      setUser(null);
+      router.push("/login");
+    }
+  };
+
+  const hasRole = useCallback(
+    (roles: string[]): boolean => {
+      if (!user) return false;
+      return roles.includes(user.role);
+    },
+    [user]
+  );
+
+  const isAuthenticated = Boolean(user && token);
+  const isAdmin = user?.role === "Admin";
 
   return (
     <AuthContext.Provider
@@ -91,7 +143,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         token,
         isLoading,
         error,
+        isAuthenticated,
+        isAdmin,
+        hasRole,
         login,
+        register,
         logout,
       }}
     >
@@ -107,3 +163,4 @@ export function useAuth(): AuthContextType {
   }
   return context;
 }
+

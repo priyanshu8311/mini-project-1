@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "postgres": {
+      "command": "node",
+      "args": ["--no-deprecation", "./.agents/scripts/run-postgres-mcp.mjs"],
+      "env": {
+        "NODE_ENV": "development"
+      }
+    }
+  }
+}

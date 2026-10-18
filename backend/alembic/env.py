@@ -2,7 +2,10 @@ import asyncio
 from logging.config import fileConfig
 
 # Import all domain models so Alembic registers them in Base.metadata
+import backend.src.domain.forecasting.models  # noqa: F401
+import backend.src.domain.integrations.models  # noqa: F401
 import backend.src.domain.inventory.models  # noqa: F401
+import backend.src.domain.purchasing.models  # noqa: F401
 import backend.src.domain.users.models  # noqa: F401
 from backend.src.core.config import settings
 from backend.src.core.database import Base

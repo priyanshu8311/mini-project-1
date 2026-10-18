@@ -9,15 +9,17 @@ import {
   TrendingUp,
   ShoppingCart,
   Settings,
+  Users,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useAuth } from "@/hooks/useAuth";
 
 interface SidebarProps {
   isOpen?: boolean;
   onClose?: () => void;
 }
 
-const NAV_ITEMS = [
+const BASE_NAV_ITEMS = [
   { name: "Dashboard", href: "/", icon: LayoutDashboard },
   { name: "Inventory", href: "/inventory", icon: Package },
   { name: "Demand Forecasting", href: "/forecasting", icon: TrendingUp },
@@ -27,6 +29,15 @@ const NAV_ITEMS = [
 
 export function Sidebar({ isOpen, onClose }: SidebarProps) {
   const pathname = usePathname();
+  const { isAdmin } = useAuth();
+
+  const navItems = isAdmin
+    ? [
+        ...BASE_NAV_ITEMS.slice(0, 4),
+        { name: "Team & Roles", href: "/settings/users", icon: Users },
+        ...BASE_NAV_ITEMS.slice(4),
+      ]
+    : BASE_NAV_ITEMS;
 
   return (
     <>
@@ -51,7 +62,7 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
             Main Navigation
           </div>
 
-          {NAV_ITEMS.map((item) => {
+          {navItems.map((item) => {
             const Icon = item.icon;
             const isActive =
               item.href === "/"

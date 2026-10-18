@@ -137,6 +137,18 @@ export default function LoginPage() {
               </Button>
             </form>
 
+            <div className="text-center pt-2">
+              <p className="text-xs text-[#64748b]">
+                New organization?{" "}
+                <Link
+                  href="/signup"
+                  className="text-[#2563eb] font-medium hover:underline focus:outline-none focus:ring-1 focus:ring-[#2563eb] rounded"
+                >
+                  Register your company workspace
+                </Link>
+              </p>
+            </div>
+
             {/* Security Notice */}
             <div className="pt-2 border-t border-[#f1f5f9] flex items-center justify-between text-[11px] text-[#64748b]">
               <span className="flex items-center gap-1">

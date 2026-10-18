@@ -6,9 +6,20 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from backend.src.core.errors import ConflictException, NotFoundException, ValidationException
-from backend.src.domain.inventory.models import SKU, Category, Location, Product
+from backend.src.domain.inventory.models import (
+    SKU,
+    Category,
+    InventoryLevel,
+    InventoryTransaction,
+    Location,
+    Product,
+    TransactionType,
+)
 from backend.src.domain.inventory.schemas import (
     CategoryCreate,
+    InventoryLevelResponse,
+    InventoryTransactionCreate,
+    InventoryTransactionResponse,
     LocationCreate,
     PaginationMeta,
     ProductCreate,
@@ -396,3 +407,465 @@ class CatalogService:
         await db.refresh(sku)
 
         return CatalogService._to_sku_response(sku)
+
+
+class InventoryService:
+    """Core inventory engine with row-locking, append-only ledger, and stock tracking."""
+
+    @staticmethod
+    async def _get_or_create_level_for_update(
+        db: AsyncSession,
+        tenant_id: UUID,
+        sku_id: UUID,
+        location_id: UUID,
+    ) -> InventoryLevel:
+        """Lock or initialize an inventory_level row using pessimistic concurrency."""
+        # 1. Verify SKU and Location existence
+        sku_res = await db.execute(
+            select(SKU).where(SKU.id == sku_id, SKU.tenant_id == tenant_id)
+        )
+        if not sku_res.scalar_one_or_none():
+            raise NotFoundException("SKU", sku_id)
+
+        loc_res = await db.execute(
+            select(Location).where(Location.id == location_id, Location.tenant_id == tenant_id)
+        )
+        if not loc_res.scalar_one_or_none():
+            raise NotFoundException("Location", location_id)
+
+        # 2. Select with pessimistic row lock
+        query = (
+            select(InventoryLevel)
+            .where(
+                InventoryLevel.tenant_id == tenant_id,
+                InventoryLevel.sku_id == sku_id,
+                InventoryLevel.location_id == location_id,
+            )
+            .with_for_update()
+        )
+        result = await db.execute(query)
+        level = result.scalar_one_or_none()
+
+        if not level:
+            level = InventoryLevel(
+                tenant_id=tenant_id,
+                sku_id=sku_id,
+                location_id=location_id,
+                on_hand=0,
+                reserved=0,
+                version=1,
+            )
+            db.add(level)
+            await db.flush()
+            await db.refresh(level)
+
+        return level
+
+    @staticmethod
+    def _to_level_response(item: InventoryLevel) -> InventoryLevelResponse:
+        sku_code = item.sku.sku_code if item.sku else None
+        prod_name = (
+            item.sku.product.name
+            if item.sku and item.sku.product
+            else None
+        )
+        loc_name = item.location.name if item.location else None
+        loc_type = item.location.type if item.location else None
+        return InventoryLevelResponse(
+            id=item.id,
+            tenant_id=item.tenant_id,
+            sku_id=item.sku_id,
+            location_id=item.location_id,
+            on_hand=item.on_hand,
+            reserved=item.reserved,
+            available=max(0, item.on_hand - item.reserved),
+            reorder_point=item.reorder_point,
+            reorder_quantity=item.reorder_quantity,
+            version=item.version,
+            created_at=item.created_at,
+            sku_code=sku_code,
+            product_name=prod_name,
+            location_name=loc_name,
+            location_type=loc_type,
+        )
+
+    @staticmethod
+    def _to_tx_response(tx: InventoryTransaction) -> InventoryTransactionResponse:
+        sku_code = tx.sku.sku_code if tx.sku else None
+        prod_name = (
+            tx.sku.product.name
+            if tx.sku and tx.sku.product
+            else None
+        )
+        loc_name = tx.location.name if tx.location else None
+        user_email = tx.user.email if tx.user else None
+        return InventoryTransactionResponse(
+            id=tx.id,
+            tenant_id=tx.tenant_id,
+            sku_id=tx.sku_id,
+            location_id=tx.location_id,
+            user_id=tx.user_id,
+            transaction_type=tx.transaction_type,
+            quantity_change=tx.quantity_change,
+            reference_id=tx.reference_id,
+            reason=tx.reason,
+            created_at=tx.created_at,
+            sku_code=sku_code,
+            product_name=prod_name,
+            location_name=loc_name,
+            user_email=user_email,
+        )
+
+    @staticmethod
+    async def record_transaction(
+        db: AsyncSession,
+        tenant_id: UUID,
+        user_id: UUID,
+        payload: InventoryTransactionCreate,
+    ) -> InventoryTransactionResponse:
+        """Atomically record a stock operation in the ledger and update inventory levels."""
+        if payload.quantity_change == 0:
+            raise ValidationException(
+                "Quantity change cannot be zero.",
+                details=[{"field": "quantity_change", "issue": "Must be non-zero"}],
+            )
+
+        if payload.transaction_type == TransactionType.TRANSFER:
+            if not payload.target_location_id:
+                raise ValidationException(
+                    "target_location_id is required for stock transfers.",
+                    details=[{"field": "target_location_id", "issue": "Required for transfer"}],
+                )
+            if payload.location_id == payload.target_location_id:
+                raise ValidationException(
+                    "Source and destination locations must be distinct.",
+                    details=[
+                        {
+                            "field": "target_location_id",
+                            "issue": "Cannot transfer to same location",
+                        }
+                    ],
+                )
+
+            qty = abs(payload.quantity_change)
+
+            # Deterministic lock ordering to prevent cross-transaction deadlocks
+            first_loc, second_loc = (
+                (payload.location_id, payload.target_location_id)
+                if str(payload.location_id) < str(payload.target_location_id)
+                else (payload.target_location_id, payload.location_id)
+            )
+
+            lvl_a = await InventoryService._get_or_create_level_for_update(
+                db, tenant_id, payload.sku_id, first_loc
+            )
+            lvl_b = await InventoryService._get_or_create_level_for_update(
+                db, tenant_id, payload.sku_id, second_loc
+            )
+
+            source_level = lvl_a if first_loc == payload.location_id else lvl_b
+            target_level = lvl_b if first_loc == payload.location_id else lvl_a
+
+            available_stock = source_level.on_hand - source_level.reserved
+            if available_stock < qty:
+                err_msg = (
+                    f"Insufficient stock ({available_stock}) at source to transfer {qty} units."
+                )
+                raise ValidationException(
+                    err_msg,
+                    details=[{"field": "quantity_change", "issue": "Insufficient available stock"}],
+                )
+
+            # Update balances atomically
+            source_level.on_hand -= qty
+            source_level.version += 1
+            target_level.on_hand += qty
+            target_level.version += 1
+
+            # Ledger entries: Outbound from source, Inbound to destination
+            tx_out = InventoryTransaction(
+                tenant_id=tenant_id,
+                sku_id=payload.sku_id,
+                location_id=payload.location_id,
+                user_id=user_id,
+                transaction_type=TransactionType.TRANSFER.value,
+                quantity_change=-qty,
+                reference_id=payload.reference_id,
+                reason=payload.reason or f"Transfer out to location {payload.target_location_id}",
+            )
+            tx_in = InventoryTransaction(
+                tenant_id=tenant_id,
+                sku_id=payload.sku_id,
+                location_id=payload.target_location_id,
+                user_id=user_id,
+                transaction_type=TransactionType.TRANSFER.value,
+                quantity_change=qty,
+                reference_id=payload.reference_id,
+                reason=payload.reason or f"Transfer in from location {payload.location_id}",
+            )
+            db.add_all([tx_out, tx_in])
+            await db.flush()
+
+            # Eager load relationships for response
+            res = await db.execute(
+                select(InventoryTransaction)
+                .where(InventoryTransaction.id == tx_out.id)
+                .options(
+                    selectinload(InventoryTransaction.sku).selectinload(SKU.product),
+                    selectinload(InventoryTransaction.location),
+                    selectinload(InventoryTransaction.user),
+                )
+            )
+            return InventoryService._to_tx_response(res.scalar_one())
+
+        elif payload.transaction_type == TransactionType.RECEIVE:
+            qty = abs(payload.quantity_change)
+            level = await InventoryService._get_or_create_level_for_update(
+                db, tenant_id, payload.sku_id, payload.location_id
+            )
+            level.on_hand += qty
+            level.version += 1
+
+            tx = InventoryTransaction(
+                tenant_id=tenant_id,
+                sku_id=payload.sku_id,
+                location_id=payload.location_id,
+                user_id=user_id,
+                transaction_type=TransactionType.RECEIVE.value,
+                quantity_change=qty,
+                reference_id=payload.reference_id,
+                reason=payload.reason,
+            )
+            db.add(tx)
+            await db.flush()
+
+            res = await db.execute(
+                select(InventoryTransaction)
+                .where(InventoryTransaction.id == tx.id)
+                .options(
+                    selectinload(InventoryTransaction.sku).selectinload(SKU.product),
+                    selectinload(InventoryTransaction.location),
+                    selectinload(InventoryTransaction.user),
+                )
+            )
+            return InventoryService._to_tx_response(res.scalar_one())
+
+        elif payload.transaction_type == TransactionType.SHIP:
+            qty = abs(payload.quantity_change)
+            level = await InventoryService._get_or_create_level_for_update(
+                db, tenant_id, payload.sku_id, payload.location_id
+            )
+            if level.on_hand < qty:
+                raise ValidationException(
+                    f"Insufficient on-hand stock ({level.on_hand}) to ship {qty} units.",
+                    details=[{"field": "quantity_change", "issue": "Insufficient on-hand stock"}],
+                )
+            level.on_hand -= qty
+            level.version += 1
+
+            tx = InventoryTransaction(
+                tenant_id=tenant_id,
+                sku_id=payload.sku_id,
+                location_id=payload.location_id,
+                user_id=user_id,
+                transaction_type=TransactionType.SHIP.value,
+                quantity_change=-qty,
+                reference_id=payload.reference_id,
+                reason=payload.reason,
+            )
+            db.add(tx)
+            await db.flush()
+
+            res = await db.execute(
+                select(InventoryTransaction)
+                .where(InventoryTransaction.id == tx.id)
+                .options(
+                    selectinload(InventoryTransaction.sku).selectinload(SKU.product),
+                    selectinload(InventoryTransaction.location),
+                    selectinload(InventoryTransaction.user),
+                )
+            )
+            return InventoryService._to_tx_response(res.scalar_one())
+
+        elif payload.transaction_type == TransactionType.ADJUST:
+            level = await InventoryService._get_or_create_level_for_update(
+                db, tenant_id, payload.sku_id, payload.location_id
+            )
+            if payload.quantity_change < 0 and level.on_hand + payload.quantity_change < 0:
+                raise ValidationException(
+                    f"Stock adjustment would reduce on-hand below zero (current: {level.on_hand}).",
+                    details=[
+                        {"field": "quantity_change", "issue": "Resulting stock cannot be negative"}
+                    ],
+                )
+            level.on_hand += payload.quantity_change
+            level.version += 1
+
+            tx = InventoryTransaction(
+                tenant_id=tenant_id,
+                sku_id=payload.sku_id,
+                location_id=payload.location_id,
+                user_id=user_id,
+                transaction_type=TransactionType.ADJUST.value,
+                quantity_change=payload.quantity_change,
+                reference_id=payload.reference_id,
+                reason=payload.reason,
+            )
+            db.add(tx)
+            await db.flush()
+
+            res = await db.execute(
+                select(InventoryTransaction)
+                .where(InventoryTransaction.id == tx.id)
+                .options(
+                    selectinload(InventoryTransaction.sku).selectinload(SKU.product),
+                    selectinload(InventoryTransaction.location),
+                    selectinload(InventoryTransaction.user),
+                )
+            )
+            return InventoryService._to_tx_response(res.scalar_one())
+
+        else:
+            raise ValidationException(f"Unsupported transaction type '{payload.transaction_type}'.")
+
+    @staticmethod
+    async def list_inventory_levels(
+        db: AsyncSession,
+        tenant_id: UUID,
+        page: int = 1,
+        limit: int = 50,
+        sku_id: UUID | None = None,
+        location_id: UUID | None = None,
+        stock_status: str | None = None,
+        search: str | None = None,
+    ) -> tuple[list[InventoryLevelResponse], PaginationMeta]:
+        """List and filter current inventory level snapshots."""
+        page = max(1, page)
+        limit = max(1, min(limit, 100))
+
+        query = (
+            select(InventoryLevel)
+            .join(InventoryLevel.sku)
+            .join(SKU.product)
+            .join(InventoryLevel.location)
+            .where(InventoryLevel.tenant_id == tenant_id)
+            .options(
+                selectinload(InventoryLevel.sku).selectinload(SKU.product),
+                selectinload(InventoryLevel.location),
+            )
+        )
+        count_query = (
+            select(func.count(InventoryLevel.id))
+            .join(InventoryLevel.sku)
+            .join(SKU.product)
+            .join(InventoryLevel.location)
+            .where(InventoryLevel.tenant_id == tenant_id)
+        )
+
+        if sku_id:
+            query = query.where(InventoryLevel.sku_id == sku_id)
+            count_query = count_query.where(InventoryLevel.sku_id == sku_id)
+
+        if location_id:
+            query = query.where(InventoryLevel.location_id == location_id)
+            count_query = count_query.where(InventoryLevel.location_id == location_id)
+
+        if stock_status == "low":
+            query = query.where(InventoryLevel.on_hand <= InventoryLevel.reorder_point)
+            count_query = count_query.where(InventoryLevel.on_hand <= InventoryLevel.reorder_point)
+        elif stock_status == "out_of_stock":
+            query = query.where(InventoryLevel.on_hand == 0)
+            count_query = count_query.where(InventoryLevel.on_hand == 0)
+        elif stock_status == "in_stock":
+            query = query.where(InventoryLevel.on_hand > 0)
+            count_query = count_query.where(InventoryLevel.on_hand > 0)
+
+        if search:
+            clean = search.strip()
+            pattern = f"%{clean}%"
+            search_cond = or_(
+                SKU.sku_code.ilike(pattern),
+                Product.name.ilike(pattern),
+                Location.name.ilike(pattern),
+            )
+            query = query.where(search_cond)
+            count_query = count_query.where(search_cond)
+
+        total_res = await db.execute(count_query)
+        total = total_res.scalar_one()
+
+        query = query.order_by(InventoryLevel.created_at.desc())
+        query = query.offset((page - 1) * limit).limit(limit)
+        results = await db.execute(query)
+        items = results.scalars().all()
+
+        responses = [InventoryService._to_level_response(item) for item in items]
+        total_pages = math.ceil(total / limit) if total > 0 else 1
+
+        meta = PaginationMeta(
+            total=total,
+            page=page,
+            limit=limit,
+            total_pages=total_pages,
+        )
+        return responses, meta
+
+    @staticmethod
+    async def list_transactions(
+        db: AsyncSession,
+        tenant_id: UUID,
+        page: int = 1,
+        limit: int = 50,
+        sku_id: UUID | None = None,
+        location_id: UUID | None = None,
+        transaction_type: str | None = None,
+    ) -> tuple[list[InventoryTransactionResponse], PaginationMeta]:
+        """Retrieve paginated ledger audit trail records."""
+        page = max(1, page)
+        limit = max(1, min(limit, 100))
+
+        query = (
+            select(InventoryTransaction)
+            .where(InventoryTransaction.tenant_id == tenant_id)
+            .options(
+                selectinload(InventoryTransaction.sku).selectinload(SKU.product),
+                selectinload(InventoryTransaction.location),
+                selectinload(InventoryTransaction.user),
+            )
+        )
+        count_query = select(func.count(InventoryTransaction.id)).where(
+            InventoryTransaction.tenant_id == tenant_id
+        )
+
+        if sku_id:
+            query = query.where(InventoryTransaction.sku_id == sku_id)
+            count_query = count_query.where(InventoryTransaction.sku_id == sku_id)
+
+        if location_id:
+            query = query.where(InventoryTransaction.location_id == location_id)
+            count_query = count_query.where(InventoryTransaction.location_id == location_id)
+
+        if transaction_type:
+            query = query.where(InventoryTransaction.transaction_type == transaction_type)
+            count_query = count_query.where(
+                InventoryTransaction.transaction_type == transaction_type
+            )
+
+        total_res = await db.execute(count_query)
+        total = total_res.scalar_one()
+
+        query = query.order_by(InventoryTransaction.created_at.desc())
+        query = query.offset((page - 1) * limit).limit(limit)
+        results = await db.execute(query)
+        items = results.scalars().all()
+
+        responses = [InventoryService._to_tx_response(tx) for tx in items]
+        total_pages = math.ceil(total / limit) if total > 0 else 1
+
+        meta = PaginationMeta(
+            total=total,
+            page=page,
+            limit=limit,
+            total_pages=total_pages,
+        )
+        return responses, meta
