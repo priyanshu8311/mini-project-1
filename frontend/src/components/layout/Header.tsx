@@ -2,13 +2,16 @@
 
 import React from "react";
 import Link from "next/link";
-import { Bell, Search, User } from "lucide-react";
+import { Bell, LogOut, Search, User } from "lucide-react";
+import { useAuth } from "@/hooks/useAuth";
 
 interface HeaderProps {
   onToggleSidebar?: () => void;
 }
 
 export function Header({ onToggleSidebar }: HeaderProps) {
+  const { user, logout } = useAuth();
+
   return (
     <header className="h-[60px] bg-white border-b border-[#e2e8f0] px-4 md:px-6 flex items-center justify-between sticky top-0 z-30">
       <div className="flex items-center gap-3">
@@ -58,15 +61,40 @@ export function Header({ onToggleSidebar }: HeaderProps) {
 
         <div className="h-6 w-px bg-[#e2e8f0]" />
 
-        <div className="flex items-center gap-2">
-          <div className="w-8 h-8 rounded-full bg-[#f1f5f9] border border-[#cbd5e1] flex items-center justify-center text-[#475569]">
-            <User className="w-4 h-4" />
+        {user ? (
+          <div className="flex items-center gap-2 sm:gap-3">
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 rounded-full bg-[#f1f5f9] border border-[#cbd5e1] flex items-center justify-center text-[#475569]">
+                <User className="w-4 h-4" />
+              </div>
+              <div className="hidden lg:flex flex-col text-left">
+                <span className="text-xs font-semibold text-[#0f172a] truncate max-w-[140px]">
+                  {user.email}
+                </span>
+                <span className="text-[10px] text-[#2563eb] font-medium">
+                  {user.role}
+                </span>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={logout}
+              title="Sign Out"
+              aria-label="Sign Out"
+              className="p-1.5 rounded text-[#64748b] hover:bg-[#fef2f2] hover:text-[#dc2626] transition-colors focus:outline-none focus:ring-2 focus:ring-[#dc2626]"
+            >
+              <LogOut className="w-4 h-4" />
+            </button>
           </div>
-          <div className="hidden lg:flex flex-col text-left">
-            <span className="text-xs font-semibold text-[#0f172a]">Admin User</span>
-            <span className="text-[10px] text-[#64748b]">Inventory Manager</span>
-          </div>
-        </div>
+        ) : (
+          <Link
+            href="/login"
+            className="inline-flex items-center justify-center h-8 px-3 text-xs font-medium rounded-[4px] bg-[#2563eb] text-white hover:bg-[#1d4ed8] transition-colors focus:outline-none focus:ring-2 focus:ring-[#2563eb]"
+          >
+            Sign In
+          </Link>
+        )}
       </div>
     </header>
   );
