@@ -1,4 +1,4 @@
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -44,6 +44,29 @@ class Settings(BaseSettings):
     def cors_origins(self) -> list[str]:
         """Parse comma-separated origins into a list."""
         return [origin.strip() for origin in self.ALLOWED_ORIGINS.split(",") if origin.strip()]
+
+    @property
+    def is_production(self) -> bool:
+        """Check if running in a production or staging deployment."""
+        return self.ENVIRONMENT.lower() in ("production", "prod", "staging")
+
+    @model_validator(mode="after")
+    def validate_production_secrets(self) -> "Settings":
+        """Enforce strict secret entropy and prevent default development keys in production."""
+        if self.is_production:
+            insecure_jwt = "dev-insecure-secret-key-change-in-production-min-32-chars"
+            insecure_enc = "dGVzdF9lbmNyeXB0aW9uX2tleV9mb3JfZGV2XzMyYnl0ZXM="
+            if self.JWT_SECRET_KEY == insecure_jwt or len(self.JWT_SECRET_KEY) < 32:
+                raise ValueError(
+                    "Production environment detected: JWT_SECRET_KEY must be an explicit, "
+                    "high-entropy key with at least 32 characters."
+                )
+            if self.ENCRYPTION_KEY == insecure_enc or len(self.ENCRYPTION_KEY) < 32:
+                raise ValueError(
+                    "Production environment detected: ENCRYPTION_KEY must be an explicit, "
+                    "secure Base64-encoded 32-byte key."
+                )
+        return self
 
     model_config = SettingsConfigDict(
         env_file=".env",

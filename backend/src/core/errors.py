@@ -111,7 +111,7 @@ def register_error_handlers(app: FastAPI) -> None:
             details.append({"field": field_path, "issue": error.get("msg", "Validation error")})
 
         return JSONResponse(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             content=format_error_response(
                 code="VALIDATION_ERROR",
                 message="Request payload validation failed.",

@@ -7,13 +7,20 @@ from starlette.exceptions import HTTPException
 
 
 class SlidingWindowRateLimiter:
-    """In-memory sliding window rate limiter by client IP address."""
+    """In-memory sliding window rate limiter by client IP address with bounded memory footprint."""
 
-    def __init__(self, max_requests: int = 5, window_seconds: int = 60):
+    def __init__(self, max_requests: int = 5, window_seconds: int = 60, max_keys: int = 2000):
         self.max_requests = max_requests
         self.window_seconds = window_seconds
+        self.max_keys = max_keys
         self._requests: dict[str, list[float]] = defaultdict(list)
         self._lock = threading.Lock()
+
+    def _prune_expired_locked(self, cutoff: float) -> None:
+        """Evict stale keys to prevent memory exhaustion."""
+        keys_to_remove = [k for k, ts in self._requests.items() if not any(t > cutoff for t in ts)]
+        for k in keys_to_remove:
+            self._requests.pop(k, None)
 
     def check(self, key: str) -> None:
         """Check if request exceeds rate limit and record the timestamp.
@@ -25,6 +32,10 @@ class SlidingWindowRateLimiter:
         cutoff = now - self.window_seconds
 
         with self._lock:
+            # Memory safeguard: prune stale entries when capacity reaches threshold
+            if len(self._requests) >= self.max_keys:
+                self._prune_expired_locked(cutoff)
+
             # Evict timestamps older than the sliding window
             timestamps = [ts for ts in self._requests[key] if ts > cutoff]
             if len(timestamps) >= self.max_requests:
@@ -54,5 +65,14 @@ login_rate_limiter = SlidingWindowRateLimiter(max_requests=5, window_seconds=60)
 
 def enforce_login_rate_limit(request: Request) -> None:
     """FastAPI dependency to enforce rate limiting on unauthenticated login."""
-    client_ip = request.client.host if request.client else "unknown"
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        client_ip = forwarded.split(",")[0].strip()
+    elif request.headers.get("cf-connecting-ip"):
+        client_ip = request.headers["cf-connecting-ip"].strip()
+    elif request.client:
+        client_ip = request.client.host
+    else:
+        client_ip = "unknown"
+
     login_rate_limiter.check(client_ip)

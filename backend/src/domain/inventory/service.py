@@ -292,13 +292,16 @@ class CatalogService:
             query = query.where(Product.category_id == category_id)
 
         if search:
-            search_pattern = f"%{search.strip().lower()}%"
-            query = query.where(
-                or_(
-                    func.lower(SKU.sku_code).like(search_pattern),
-                    func.lower(Product.name).like(search_pattern),
-                )
+            clean_search = search.strip().lower()
+            escaped_search = (
+                clean_search.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
             )
+            search_pattern = f"%{escaped_search}%"
+            search_cond = or_(
+                func.lower(SKU.sku_code).like(search_pattern, escape="\\"),
+                func.lower(Product.name).like(search_pattern, escape="\\"),
+            )
+            query = query.where(search_cond)
 
         # Total count query
         count_query = (
@@ -309,19 +312,20 @@ class CatalogService:
         if category_id:
             count_query = count_query.where(Product.category_id == category_id)
         if search:
-            search_pattern = f"%{search.strip().lower()}%"
-            count_query = count_query.where(
-                or_(
-                    func.lower(SKU.sku_code).like(search_pattern),
-                    func.lower(Product.name).like(search_pattern),
-                )
-            )
+            count_query = count_query.where(search_cond)
 
         total_res = await db.execute(count_query)
         total = total_res.scalar_one()
 
-        # Sorting
-        sort_column = getattr(SKU, sort_by, SKU.created_at)
+        # Sorting with safe column allowlist
+        allowed_sort_columns = {
+            "created_at": SKU.created_at,
+            "sku_code": SKU.sku_code,
+            "unit_cost": SKU.unit_cost,
+            "sales_price": SKU.sales_price,
+            "lead_time_days": SKU.lead_time_days,
+        }
+        sort_column = allowed_sort_columns.get(sort_by, SKU.created_at)
         if sort_order.lower() == "asc":
             query = query.order_by(sort_column.asc())
         else:
@@ -782,11 +786,13 @@ class InventoryService:
 
         if search:
             clean = search.strip()
-            pattern = f"%{clean}%"
+            # Escape LIKE wildcards to prevent wildcard injection attacks
+            escaped = clean.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+            pattern = f"%{escaped}%"
             search_cond = or_(
-                SKU.sku_code.ilike(pattern),
-                Product.name.ilike(pattern),
-                Location.name.ilike(pattern),
+                SKU.sku_code.ilike(pattern, escape="\\"),
+                Product.name.ilike(pattern, escape="\\"),
+                Location.name.ilike(pattern, escape="\\"),
             )
             query = query.where(search_cond)
             count_query = count_query.where(search_cond)
