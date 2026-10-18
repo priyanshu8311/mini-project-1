@@ -9,4 +9,4 @@ minversion = "8.0"
 addopts = "-ra -q"
 asyncio_mode = "auto"
 testpaths = ["tests"]
-pythonpath = ["."]
+pythonpath = ["..", "."]

@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+
 from backend.src.api.router import api_router
 from backend.src.core.config import settings
 from backend.src.core.errors import register_error_handlers

@@ -1,6 +1,7 @@
 import uuid
-from datetime import datetime, timezone
-from typing import AsyncGenerator
+from collections.abc import AsyncGenerator
+from datetime import UTC, datetime
+
 from sqlalchemy import MetaData
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.ext.asyncio import (
@@ -9,6 +10,7 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+
 from backend.src.core.config import settings
 
 # Enforce consistent naming conventions for PostgreSQL constraints and indexes
@@ -25,11 +27,13 @@ metadata = MetaData(naming_convention=POSTGRES_NAMING_CONVENTION)
 
 class Base(DeclarativeBase):
     """Base model class with default metadata convention."""
+
     metadata = metadata
 
 
 class BaseModel(Base):
     """Abstract base model supplying UUID primary key and UTC timestamp tracking."""
+
     __abstract__ = True
 
     id: Mapped[uuid.UUID] = mapped_column(
@@ -38,7 +42,7 @@ class BaseModel(Base):
         default=uuid.uuid4,
     )
     created_at: Mapped[datetime] = mapped_column(
-        default=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
     )
 
 

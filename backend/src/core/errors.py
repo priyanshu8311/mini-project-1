@@ -1,8 +1,10 @@
-from typing import Any, Dict, List, Optional
-from fastapi import FastAPI, HTTPException, Request, status
+import logging
+from typing import Any
+
+from fastapi import FastAPI, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
-import logging
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 logger = logging.getLogger("smart_inventory.errors")
 
@@ -15,7 +17,7 @@ class AppException(Exception):
         code: str,
         message: str,
         status_code: int = status.HTTP_400_BAD_REQUEST,
-        details: Optional[List[Dict[str, Any]]] = None,
+        details: list[dict[str, Any]] | None = None,
     ):
         self.code = code
         self.message = message
@@ -52,7 +54,7 @@ class ForbiddenException(AppException):
 
 
 class ConflictException(AppException):
-    def __init__(self, message: str, details: Optional[List[Dict[str, Any]]] = None):
+    def __init__(self, message: str, details: list[dict[str, Any]] | None = None):
         super().__init__(
             code="CONFLICT",
             message=message,
@@ -61,7 +63,9 @@ class ConflictException(AppException):
         )
 
 
-def format_error_response(code: str, message: str, details: Optional[List[Dict[str, Any]]] = None) -> Dict[str, Any]:
+def format_error_response(
+    code: str, message: str, details: list[dict[str, Any]] | None = None
+) -> dict[str, Any]:
     """Format error output exactly matching API.md specification."""
     return {
         "error": {
@@ -83,8 +87,10 @@ def register_error_handlers(app: FastAPI) -> None:
         )
 
     @app.exception_handler(RequestValidationError)
-    async def validation_exception_handler(_request: Request, exc: RequestValidationError) -> JSONResponse:
-        details: List[Dict[str, Any]] = []
+    async def validation_exception_handler(
+        _request: Request, exc: RequestValidationError
+    ) -> JSONResponse:
+        details: list[dict[str, Any]] = []
         for error in exc.errors():
             field_path = " -> ".join(str(loc) for loc in error.get("loc", []))
             details.append({"field": field_path, "issue": error.get("msg", "Validation error")})
@@ -98,12 +104,15 @@ def register_error_handlers(app: FastAPI) -> None:
             ),
         )
 
-    @app.exception_handler(HTTPException)
-    async def http_exception_handler(_request: Request, exc: HTTPException) -> JSONResponse:
+    @app.exception_handler(StarletteHTTPException)
+    async def starlette_http_exception_handler(
+        _request: Request, exc: StarletteHTTPException
+    ) -> JSONResponse:
         code_map = {
             status.HTTP_401_UNAUTHORIZED: "UNAUTHORIZED",
             status.HTTP_403_FORBIDDEN: "FORBIDDEN",
             status.HTTP_404_NOT_FOUND: "NOT_FOUND",
+            status.HTTP_405_METHOD_NOT_ALLOWED: "METHOD_NOT_ALLOWED",
             status.HTTP_409_CONFLICT: "CONFLICT",
             status.HTTP_429_TOO_MANY_REQUESTS: "RATE_LIMIT_EXCEEDED",
         }
