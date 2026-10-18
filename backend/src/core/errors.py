@@ -63,6 +63,16 @@ class ConflictException(AppException):
         )
 
 
+class ValidationException(AppException):
+    def __init__(self, message: str, details: list[dict[str, Any]] | None = None):
+        super().__init__(
+            code="VALIDATION_ERROR",
+            message=message,
+            status_code=status.HTTP_400_BAD_REQUEST,
+            details=details,
+        )
+
+
 def format_error_response(
     code: str, message: str, details: list[dict[str, Any]] | None = None
 ) -> dict[str, Any]:
