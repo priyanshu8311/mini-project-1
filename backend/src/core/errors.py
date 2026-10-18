@@ -121,6 +121,7 @@ def register_error_handlers(app: FastAPI) -> None:
         return JSONResponse(
             status_code=exc.status_code,
             content=format_error_response(code, message),
+            headers=dict(exc.headers) if exc.headers else None,
         )
 
     @app.exception_handler(Exception)

@@ -1,0 +1,17 @@
+{
+  "name": "smart-inventory-system",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Smart Inventory Management & Demand Forecasting System",
+  "scripts": {
+    "dev:frontend": "npm run dev --prefix frontend",
+    "build:frontend": "npm run build --prefix frontend",
+    "lint:frontend": "npm run lint --prefix frontend",
+    "dev:backend": "backend\\.venv\\Scripts\\uvicorn backend.src.main:app --reload --port 8000",
+    "test:backend": "backend\\.venv\\Scripts\\pytest -c backend/pyproject.toml backend/tests",
+    "lint:backend": "backend\\.venv\\Scripts\\ruff check backend",
+    "format:backend": "backend\\.venv\\Scripts\\ruff format backend",
+    "docker:up": "docker compose up -d",
+    "docker:down": "docker compose down"
+  }
+}
