@@ -199,18 +199,37 @@ class CatalogService:
         # Determine product association
         if payload.product_id:
             product = await CatalogService.get_product_by_id(db, tenant_id, payload.product_id)
-        elif payload.product_name and payload.category_id:
+        elif payload.product_name:
+            target_cat_id = payload.category_id
+            if not target_cat_id:
+                # Find or create a default 'General' category for this tenant
+                cat_result = await db.execute(
+                    select(Category).where(
+                        Category.tenant_id == tenant_id,
+                        Category.name == "General",
+                    )
+                )
+                default_cat = cat_result.scalar_one_or_none()
+                if not default_cat:
+                    default_cat = Category(
+                        tenant_id=tenant_id,
+                        name="General",
+                    )
+                    db.add(default_cat)
+                    await db.flush()
+                target_cat_id = default_cat.id
+
             product = await CatalogService.create_product(
                 db,
                 tenant_id,
                 ProductCreate(
                     name=payload.product_name,
-                    category_id=payload.category_id,
+                    category_id=target_cat_id,
                 ),
             )
         else:
             raise ValidationException(
-                "Either 'product_id' or both 'product_name' and 'category_id' must be provided."
+                "Either 'product_id' or 'product_name' must be provided."
             )
 
         sku = SKU(

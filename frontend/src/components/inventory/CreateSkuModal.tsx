@@ -162,7 +162,7 @@ export function CreateSkuModal({
                 onChange={(e) => setCategoryId(e.target.value)}
                 className="w-full h-10 px-3 text-sm rounded-[4px] border border-[#cbd5e1] bg-white text-[#0f172a] focus:outline-none focus:ring-2 focus:ring-[#2563eb] focus:border-transparent"
               >
-                <option value="">Select Category (Optional)</option>
+                <option value="">General (Default)</option>
                 {categories.map((cat) => (
                   <option key={cat.id} value={cat.id}>
                     {cat.name}
