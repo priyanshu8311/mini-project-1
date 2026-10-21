@@ -31,6 +31,11 @@ class Base(DeclarativeBase):
     metadata = metadata
 
 
+def utcnow() -> datetime:
+    """Return naive UTC datetime for PostgreSQL TIMESTAMP WITHOUT TIME ZONE compatibility."""
+    return datetime.now(UTC).replace(tzinfo=None)
+
+
 class BaseModel(Base):
     """Abstract base model supplying UUID primary key and UTC timestamp tracking."""
 
@@ -42,7 +47,7 @@ class BaseModel(Base):
         default=uuid.uuid4,
     )
     created_at: Mapped[datetime] = mapped_column(
-        default=lambda: datetime.now(UTC),
+        default=utcnow,
     )
 
 

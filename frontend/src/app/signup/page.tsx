@@ -77,7 +77,7 @@ export default function SignupPage() {
   };
 
   return (
-    <div className="min-h-[85vh] flex items-center justify-center py-10 px-4 sm:px-6 lg:px-8">
+    <div className="w-full min-h-[85vh] flex items-center justify-center py-10 px-4 sm:px-6 lg:px-8">
       <div className="w-full max-w-md space-y-6">
         {/* Brand Header */}
         <div className="text-center space-y-2">
