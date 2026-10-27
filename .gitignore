@@ -1,8 +1,12 @@
 # Environment files
 .env
+.env.*
 .env.local
+.env.production
 .env.*.local
+.env.*.production
 !.env.example
+!.env*.example
 
 # Python
 __pycache__/

@@ -2,7 +2,7 @@
 line-length = 100
 target-version = "py312"
 lint.select = ["E", "F", "W", "I", "B", "C4", "UP"]
-lint.ignore = ["B008"]
+lint.ignore = ["B008", "E501"]
 
 [tool.pytest.ini_options]
 minversion = "8.0"

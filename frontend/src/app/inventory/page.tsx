@@ -9,12 +9,15 @@ import {
   SlidersHorizontal,
   AlertTriangle,
   Clock,
+  ArrowRightLeft,
 } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/Card";
 import { DataTable, ColumnDef } from "@/components/ui/DataTable";
 import { CreateSkuModal, CategoryOption } from "@/components/inventory/CreateSkuModal";
+import { AdjustStockModal } from "@/components/inventory/AdjustStockModal";
+import { TransferStockModal } from "@/components/inventory/TransferStockModal";
 import { apiClient } from "@/lib/api-client";
 import { useAuth } from "@/hooks/useAuth";
 
@@ -59,6 +62,8 @@ export default function InventoryPage() {
   const [sortBy, setSortBy] = useState<string>("created_at");
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
   const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
+  const [isAdjustModalOpen, setIsAdjustModalOpen] = useState<boolean>(false);
+  const [isTransferModalOpen, setIsTransferModalOpen] = useState<boolean>(false);
 
   // Debounce search input
   useEffect(() => {
@@ -239,6 +244,24 @@ export default function InventoryPage() {
             <RefreshCw className="w-4 h-4 mr-1.5" />
             Refresh
           </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setIsAdjustModalOpen(true)}
+            title="Adjust Stock Level"
+          >
+            <SlidersHorizontal className="w-4 h-4 mr-1.5" />
+            Adjust Stock
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setIsTransferModalOpen(true)}
+            title="Transfer Stock Between Locations"
+          >
+            <ArrowRightLeft className="w-4 h-4 mr-1.5" />
+            Transfer Stock
+          </Button>
           {canWriteCatalog && (
             <Button
               variant="primary"
@@ -390,6 +413,24 @@ export default function InventoryPage() {
           refetchSkus();
         }}
         categories={categories}
+      />
+
+      {/* Adjust Stock Modal */}
+      <AdjustStockModal
+        isOpen={isAdjustModalOpen}
+        onClose={() => setIsAdjustModalOpen(false)}
+        onSuccess={() => {
+          refetchSkus();
+        }}
+      />
+
+      {/* Transfer Stock Modal */}
+      <TransferStockModal
+        isOpen={isTransferModalOpen}
+        onClose={() => setIsTransferModalOpen(false)}
+        onSuccess={() => {
+          refetchSkus();
+        }}
       />
     </div>
   );
