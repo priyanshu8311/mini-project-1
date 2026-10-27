@@ -127,4 +127,3 @@ async def update_user_status(
         actor_user_id=current_admin.id,
     )
     return UserResponse.model_validate(updated_user)
-

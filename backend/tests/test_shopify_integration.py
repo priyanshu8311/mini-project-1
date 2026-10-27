@@ -482,7 +482,8 @@ async def test_shopify_order_webhook_deduplication(
     test_admin_user: User,
     db_session: AsyncSession,
 ) -> None:
-    """Duplicate webhook invocations for the same order must be skipped to avoid double deduction.
+    """Duplicate webhook invocations for the same order must be skipped
+    to avoid double deduction.
     """
     loc = Location(tenant_id=test_tenant.id, name="Store", type=LocationType.STORE)
     cat = Category(tenant_id=test_tenant.id, name="Electronics")

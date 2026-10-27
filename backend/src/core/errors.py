@@ -91,6 +91,21 @@ def format_error_response(
     }
 
 
+def _cors_headers(request: Request) -> dict[str, str]:
+    """Helper to ensure CORS headers are present on exception responses."""
+    from backend.src.core.config import settings
+
+    origin = request.headers.get("origin")
+    if origin and (origin in settings.cors_origins or "*" in settings.cors_origins):
+        return {
+            "Access-Control-Allow-Origin": origin,
+            "Access-Control-Allow-Credentials": "true",
+            "Access-Control-Allow-Methods": "*",
+            "Access-Control-Allow-Headers": "*",
+        }
+    return {}
+
+
 def register_error_handlers(app: FastAPI) -> None:
     """Register standardized exception handlers onto the FastAPI application."""
 
@@ -99,6 +114,7 @@ def register_error_handlers(app: FastAPI) -> None:
         return JSONResponse(
             status_code=exc.status_code,
             content=format_error_response(exc.code, exc.message, exc.details),
+            headers=_cors_headers(_request),
         )
 
     @app.exception_handler(RequestValidationError)
@@ -117,6 +133,7 @@ def register_error_handlers(app: FastAPI) -> None:
                 message="Request payload validation failed.",
                 details=details,
             ),
+            headers=_cors_headers(_request),
         )
 
     @app.exception_handler(StarletteHTTPException)
@@ -133,10 +150,12 @@ def register_error_handlers(app: FastAPI) -> None:
         }
         code = code_map.get(exc.status_code, "HTTP_ERROR")
         message = str(exc.detail) if isinstance(exc.detail, str) else "An HTTP error occurred."
+        headers = dict(exc.headers) if exc.headers else {}
+        headers.update(_cors_headers(_request))
         return JSONResponse(
             status_code=exc.status_code,
             content=format_error_response(code, message),
-            headers=dict(exc.headers) if exc.headers else None,
+            headers=headers if headers else None,
         )
 
     @app.exception_handler(Exception)
@@ -148,4 +167,5 @@ def register_error_handlers(app: FastAPI) -> None:
                 code="INTERNAL_SERVER_ERROR",
                 message="An unexpected server error occurred. Please contact support.",
             ),
+            headers=_cors_headers(_request),
         )

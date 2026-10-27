@@ -44,9 +44,7 @@ async def seed_database() -> None:
 
     async with AsyncSessionLocal() as db:
         # 1. Check or create demo tenant
-        tenant_res = await db.execute(
-            select(Tenant).where(Tenant.name == "Demo Enterprise Corp")
-        )
+        tenant_res = await db.execute(select(Tenant).where(Tenant.name == "Demo Enterprise Corp"))
         tenant = tenant_res.scalar_one_or_none()
         if not tenant:
             tenant = Tenant(name="Demo Enterprise Corp")

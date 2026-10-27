@@ -43,9 +43,7 @@ class SalesHistory(BaseModel):
     sku: Mapped["SKU"] = relationship("SKU")
     location: Mapped["Location"] = relationship("Location")
 
-    __table_args__ = (
-        Index("idx_sales_history_ml", "tenant_id", "sku_id", "sales_date"),
-    )
+    __table_args__ = (Index("idx_sales_history_ml", "tenant_id", "sku_id", "sales_date"),)
 
 
 class DemandForecast(BaseModel):

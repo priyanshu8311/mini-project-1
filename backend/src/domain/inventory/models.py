@@ -263,4 +263,3 @@ class InventoryTransaction(BaseModel):
         Index("idx_inv_tx_created", "tenant_id", "sku_id", "created_at"),
         Index("idx_inv_tx_tenant_loc", "tenant_id", "location_id"),
     )
-

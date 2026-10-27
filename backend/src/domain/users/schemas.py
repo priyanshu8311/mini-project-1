@@ -98,4 +98,3 @@ class LogoutResponse(BaseModel):
     """Acknowledgment payload for session logout."""
 
     message: str = "Logged out successfully"
-

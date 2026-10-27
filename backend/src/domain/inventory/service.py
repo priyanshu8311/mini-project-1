@@ -62,9 +62,7 @@ class CatalogService:
     ) -> list[Category]:
         """List all categories for a tenant."""
         result = await db.execute(
-            select(Category)
-            .where(Category.tenant_id == tenant_id)
-            .order_by(Category.name.asc())
+            select(Category).where(Category.tenant_id == tenant_id).order_by(Category.name.asc())
         )
         return list(result.scalars().all())
 
@@ -152,9 +150,7 @@ class CatalogService:
     ) -> list[Location]:
         """List all physical locations for a tenant."""
         result = await db.execute(
-            select(Location)
-            .where(Location.tenant_id == tenant_id)
-            .order_by(Location.name.asc())
+            select(Location).where(Location.tenant_id == tenant_id).order_by(Location.name.asc())
         )
         return list(result.scalars().all())
 
@@ -228,9 +224,7 @@ class CatalogService:
                 ),
             )
         else:
-            raise ValidationException(
-                "Either 'product_id' or 'product_name' must be provided."
-            )
+            raise ValidationException("Either 'product_id' or 'product_name' must be provided.")
 
         sku = SKU(
             tenant_id=tenant_id,
@@ -264,11 +258,7 @@ class CatalogService:
 
     @staticmethod
     def _to_sku_response(sku: SKU) -> SKUResponse:
-        cat_name = (
-            sku.product.category.name
-            if sku.product and sku.product.category
-            else None
-        )
+        cat_name = sku.product.category.name if sku.product and sku.product.category else None
         return SKUResponse(
             id=sku.id,
             tenant_id=sku.tenant_id,
@@ -444,9 +434,7 @@ class InventoryService:
     ) -> InventoryLevel:
         """Lock or initialize an inventory_level row using pessimistic concurrency."""
         # 1. Verify SKU and Location existence
-        sku_res = await db.execute(
-            select(SKU).where(SKU.id == sku_id, SKU.tenant_id == tenant_id)
-        )
+        sku_res = await db.execute(select(SKU).where(SKU.id == sku_id, SKU.tenant_id == tenant_id))
         if not sku_res.scalar_one_or_none():
             raise NotFoundException("SKU", sku_id)
 
@@ -487,11 +475,7 @@ class InventoryService:
     @staticmethod
     def _to_level_response(item: InventoryLevel) -> InventoryLevelResponse:
         sku_code = item.sku.sku_code if item.sku else None
-        prod_name = (
-            item.sku.product.name
-            if item.sku and item.sku.product
-            else None
-        )
+        prod_name = item.sku.product.name if item.sku and item.sku.product else None
         loc_name = item.location.name if item.location else None
         loc_type = item.location.type if item.location else None
         return InventoryLevelResponse(
@@ -515,11 +499,7 @@ class InventoryService:
     @staticmethod
     def _to_tx_response(tx: InventoryTransaction) -> InventoryTransactionResponse:
         sku_code = tx.sku.sku_code if tx.sku else None
-        prod_name = (
-            tx.sku.product.name
-            if tx.sku and tx.sku.product
-            else None
-        )
+        prod_name = tx.sku.product.name if tx.sku and tx.sku.product else None
         loc_name = tx.location.name if tx.location else None
         user_email = tx.user.email if tx.user else None
         return InventoryTransactionResponse(

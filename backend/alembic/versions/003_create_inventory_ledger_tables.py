@@ -5,6 +5,7 @@ Revises: 002_catalog_locations
 Create Date: 2026-10-18 12:30:00.000000
 
 """
+
 from collections.abc import Sequence
 
 import sqlalchemy as sa

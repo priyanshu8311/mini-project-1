@@ -105,9 +105,7 @@ class UserService:
     ) -> list[User]:
         """List all users within a tenant organization."""
         result = await db.execute(
-            select(User)
-            .where(User.tenant_id == tenant_id)
-            .order_by(User.created_at.desc())
+            select(User).where(User.tenant_id == tenant_id).order_by(User.created_at.desc())
         )
         return list(result.scalars().all())
 
@@ -176,4 +174,3 @@ class UserService:
             )
 
         return user
-

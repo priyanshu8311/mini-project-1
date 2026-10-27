@@ -210,4 +210,3 @@ class InventoryTransactionResponse(BaseModel):
     user_email: str | None = None
 
     model_config = ConfigDict(from_attributes=True)
-

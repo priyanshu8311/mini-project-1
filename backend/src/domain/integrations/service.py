@@ -456,11 +456,13 @@ class ShopifyService:
             quantity = item.get("quantity", 1)
 
             if not sku_code:
-                details.append({
-                    "line_id": line_id,
-                    "status": "skipped",
-                    "reason": "Missing SKU code on line item",
-                })
+                details.append(
+                    {
+                        "line_id": line_id,
+                        "status": "skipped",
+                        "reason": "Missing SKU code on line item",
+                    }
+                )
                 continue
 
             # Find matching SKU
@@ -473,11 +475,13 @@ class ShopifyService:
             sku = sku_record.scalar_one_or_none()
 
             if not sku:
-                details.append({
-                    "sku": sku_code,
-                    "status": "unmatched",
-                    "reason": f"SKU {sku_code} not found in system catalog",
-                })
+                details.append(
+                    {
+                        "sku": sku_code,
+                        "status": "unmatched",
+                        "reason": f"SKU {sku_code} not found in system catalog",
+                    }
+                )
                 continue
 
             ref_id = f"shopify_order_{order_id}_{line_id}"
@@ -498,11 +502,13 @@ class ShopifyService:
                     payload=tx_create,
                 )
                 processed_count += 1
-                details.append({
-                    "sku": sku_code,
-                    "quantity": quantity,
-                    "status": "decremented",
-                })
+                details.append(
+                    {
+                        "sku": sku_code,
+                        "quantity": quantity,
+                        "status": "decremented",
+                    }
+                )
             except Exception as exc:
                 logger.error(
                     "Failed to record inventory sale for SKU %s on order %s: %s",
@@ -510,12 +516,14 @@ class ShopifyService:
                     order_id,
                     exc,
                 )
-                details.append({
-                    "sku": sku_code,
-                    "quantity": quantity,
-                    "status": "failed",
-                    "error": str(exc),
-                })
+                details.append(
+                    {
+                        "sku": sku_code,
+                        "quantity": quantity,
+                        "status": "failed",
+                        "error": str(exc),
+                    }
+                )
 
         return ShopifyWebhookProcessResult(
             status="processed",

@@ -96,4 +96,3 @@ async def logout(
 ) -> LogoutResponse:
     """Acknowledge authenticated session termination and prompt client-side token disposal."""
     return LogoutResponse(message="Logged out successfully.")
-

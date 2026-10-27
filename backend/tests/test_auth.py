@@ -446,4 +446,3 @@ async def test_cross_tenant_isolation(
         headers={"Authorization": f"Bearer {admin_token}"},
     )
     assert not_found_resp.status_code == 404
-
