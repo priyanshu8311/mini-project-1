@@ -1,0 +1,9 @@
+# Enforce LF endings on shell scripts and Dockerfiles across all operating systems
+*.sh text eol=lf
+*.bash text eol=lf
+Dockerfile text eol=lf
+*.dockerfile text eol=lf
+
+# Auto-detect text files
+* text=auto
+

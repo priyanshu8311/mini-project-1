@@ -51,12 +51,15 @@ class BaseModel(Base):
     )
 
 
-# Configure Async SQLAlchemy Engine
+# Configure Async SQLAlchemy Engine with bounded production connection pooling
 engine = create_async_engine(
     settings.DATABASE_URL,
     echo=settings.LOG_LEVEL.upper() == "DEBUG",
     future=True,
     pool_pre_ping=True,
+    pool_size=10,
+    max_overflow=20,
+    pool_recycle=3600,
 )
 
 # Configure Async Sessionmaker

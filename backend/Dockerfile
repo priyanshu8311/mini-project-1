@@ -48,6 +48,7 @@ COPY --from=builder /install /usr/local
 # Copy application source, migrations, and scripts
 COPY --chown=appuser:appgroup alembic.ini ./alembic.ini
 COPY --chown=appuser:appgroup alembic/ ./alembic/
+COPY --chown=appuser:appgroup __init__.py ./backend/__init__.py
 COPY --chown=appuser:appgroup src/ ./backend/src/
 COPY --chown=appuser:appgroup scripts/ ./scripts/
 

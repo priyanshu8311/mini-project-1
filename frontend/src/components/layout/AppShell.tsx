@@ -56,6 +56,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <div className="flex flex-col items-center gap-3">
           <Loader2 className="w-8 h-8 text-[#2563eb] animate-spin" />
           <p className="text-xs text-[#64748b]">Redirecting to authentication portal...</p>
+          <a
+            href={`/login?redirect=${encodeURIComponent(pathname)}`}
+            className="text-xs text-[#2563eb] hover:underline mt-1"
+          >
+            Click here if you are not redirected automatically
+          </a>
         </div>
       </div>
     );

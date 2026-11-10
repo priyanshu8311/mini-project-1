@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from "@/components/ui/Card";
 import { Badge } from "@/components/ui/Badge";
-import { Button } from "@/components/ui/Button";
 import {
   Package,
   TrendingUp,
@@ -103,11 +102,12 @@ export default function DashboardPage() {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <Link href="/inventory">
-              <Button variant="outline" size="sm" className="w-full justify-between">
-                <span>View Inventory</span>
-                <ArrowRight className="w-4 h-4" />
-              </Button>
+            <Link
+              href="/inventory"
+              className="inline-flex items-center justify-between w-full h-8 px-3 text-xs font-medium rounded-[4px] border border-[#cbd5e1] bg-white text-[#0f172a] hover:bg-[#f8fafc] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563eb]"
+            >
+              <span>View Inventory</span>
+              <ArrowRight className="w-4 h-4" />
             </Link>
           </CardContent>
         </Card>
@@ -123,11 +123,12 @@ export default function DashboardPage() {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <Link href="/forecasting">
-              <Button variant="outline" size="sm" className="w-full justify-between">
-                <span>View Forecasts</span>
-                <ArrowRight className="w-4 h-4" />
-              </Button>
+            <Link
+              href="/forecasting"
+              className="inline-flex items-center justify-between w-full h-8 px-3 text-xs font-medium rounded-[4px] border border-[#cbd5e1] bg-white text-[#0f172a] hover:bg-[#f8fafc] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563eb]"
+            >
+              <span>View Forecasts</span>
+              <ArrowRight className="w-4 h-4" />
             </Link>
           </CardContent>
         </Card>
@@ -143,11 +144,12 @@ export default function DashboardPage() {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <Link href="/purchasing">
-              <Button variant="outline" size="sm" className="w-full justify-between">
-                <span>View Replenishment</span>
-                <ArrowRight className="w-4 h-4" />
-              </Button>
+            <Link
+              href="/purchasing"
+              className="inline-flex items-center justify-between w-full h-8 px-3 text-xs font-medium rounded-[4px] border border-[#cbd5e1] bg-white text-[#0f172a] hover:bg-[#f8fafc] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2563eb]"
+            >
+              <span>View Replenishment</span>
+              <ArrowRight className="w-4 h-4" />
             </Link>
           </CardContent>
         </Card>

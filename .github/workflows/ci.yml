@@ -95,4 +95,6 @@ jobs:
           POSTGRES_USER: app_user
           POSTGRES_PASSWORD: sample_secure_password_for_validation
           JWT_SECRET_KEY: sample_jwt_secret_key_at_least_32_chars_long
+          ENCRYPTION_KEY: sample_encryption_key_at_least_32_chars_long
+          REDIS_PASSWORD: sample_redis_password_for_validation
           SHOPIFY_API_SECRET: sample_shopify_secret_key

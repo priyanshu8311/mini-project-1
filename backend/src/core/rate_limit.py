@@ -65,11 +65,16 @@ login_rate_limiter = SlidingWindowRateLimiter(max_requests=5, window_seconds=60)
 
 def enforce_login_rate_limit(request: Request) -> None:
     """FastAPI dependency to enforce rate limiting on unauthenticated login."""
-    forwarded = request.headers.get("x-forwarded-for")
-    if forwarded:
-        client_ip = forwarded.split(",")[0].strip()
+    # Prioritize trusted proxy headers set by Nginx (X-Real-IP) to prevent client spoofing
+    real_ip = request.headers.get("x-real-ip")
+    if real_ip:
+        client_ip = real_ip.strip()
     elif request.headers.get("cf-connecting-ip"):
         client_ip = request.headers["cf-connecting-ip"].strip()
+    elif request.headers.get("x-forwarded-for"):
+        forwarded = request.headers["x-forwarded-for"]
+        ips = [ip.strip() for ip in forwarded.split(",") if ip.strip()]
+        client_ip = ips[-1] if ips else "unknown"
     elif request.client:
         client_ip = request.client.host
     else:

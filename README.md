@@ -19,6 +19,7 @@ A production-grade, multi-tenant inventory management and AI-driven demand forec
 11. [Installation & Getting Started](#11-installation--getting-started)
 12. [Database Inspection & Helpful Commands](#12-database-inspection--helpful-commands)
 13. [Testing, Quality & Developer Guidelines](#13-testing-quality--developer-guidelines)
+14. [Production Deployment & Operations Guide](#14-production-deployment--operations-guide)
 
 ---
 
@@ -426,3 +427,129 @@ npm run lint:frontend
 2. **Type Safety:** Strict Python type hints and Pydantic validation on the backend; TypeScript interfaces with zero `any` on the frontend.
 3. **No Unnecessary Dependencies:** Leverage FastAPI, SQLAlchemy, Next.js, and React Query before considering new packages.
 4. **Secret Protection:** Never commit `.env` or hardcode sensitive tokens or passwords into source code.
+
+---
+
+## 14. Production Deployment & Operations Guide
+
+Follow this battle-tested step-by-step workflow to deploy Smart Inventory to production safely.
+
+### Pre-Deployment Architecture Overview
+*   **Nginx Reverse Proxy:** Routes port 80 & 443 with TLS 1.2/1.3, gzip, and proxies `/api/` to FastAPI and `/` to Next.js.
+*   **FastAPI Backend:** Runs 4 async Uvicorn workers (`WEB_CONCURRENCY=4`) behind Nginx with OWASP security headers, bounded connection pooling (`pool_size=10, max_overflow=20`), and rate limiting.
+*   **Next.js Frontend:** Runs as an optimized standalone Node.js server.
+*   **PostgreSQL 15:** Runs with persistent volume storage (`postgres_data`), automated healthchecks, and strict credential isolation.
+*   **Redis 7:** Configured with password authentication for queue and caching.
+*   **Certbot:** Periodically auto-renews Let's Encrypt certificates every 12 hours via ACME HTTP webroot.
+*   **Log Rotation:** All Docker services have log limits (`max-size: 20m, max-file: 5`) to prevent disk exhaustion.
+
+---
+
+### Step 1: Generate Cryptographically Secure Secrets
+Run the bundled secret generator utility:
+```bash
+python scripts/generate_secrets.py
+```
+This produces high-entropy random values for `JWT_SECRET_KEY`, `ENCRYPTION_KEY`, `POSTGRES_PASSWORD`, and `REDIS_PASSWORD`.
+
+### Step 2: Configure `.env.production`
+On your production server, create `.env.production`:
+```bash
+cp .env.production.example .env.production
+```
+Populate the newly generated secrets into `.env.production`, and update `ALLOWED_ORIGINS` with your production domains:
+```env
+ENVIRONMENT=production
+LOG_LEVEL=INFO
+PROJECT_NAME="Smart Inventory Management & Demand Forecasting"
+API_V1_PREFIX=/api/v1
+WEB_CONCURRENCY=4
+
+JWT_SECRET_KEY=<your-64-char-hex-generated-key>
+ENCRYPTION_KEY=<your-32-byte-base64-generated-key>
+
+POSTGRES_USER=smart_inv_admin
+POSTGRES_PASSWORD=<your-strong-random-db-password>
+POSTGRES_DB=smart_inventory_prod
+
+REDIS_PASSWORD=<your-strong-random-redis-password>
+
+# Update with your domain or IP:
+ALLOWED_ORIGINS=https://app.yourdomain.com,https://api.yourdomain.com
+```
+
+### Step 3: Initialize SSL Certificates
+Before starting Nginx, ensure the fallback SSL certificates exist so Nginx can start:
+```bash
+python scripts/init_ssl.py
+```
+
+*For live Let's Encrypt certificates:*
+Once your domain points to your server's public IP, obtain official certificates with Certbot:
+```bash
+docker compose -f docker-compose.prod.yml run --rm certbot certonly \
+  --webroot -w /var/www/certbot \
+  -d app.yourdomain.com \
+  --email admin@yourdomain.com \
+  --agree-tos --no-eff-email
+```
+Then reload Nginx:
+```bash
+docker compose -f docker-compose.prod.yml exec nginx nginx -s reload
+```
+
+### Step 4: Build and Start the Stack
+Launch all production containers in detached mode:
+```bash
+docker compose -f docker-compose.prod.yml up -d --build
+```
+
+Check container health status:
+```bash
+docker compose -f docker-compose.prod.yml ps
+```
+All services (`smart_inventory_prod_db`, `smart_inventory_prod_redis`, `smart_inventory_prod_backend`, `smart_inventory_prod_frontend`, `smart_inventory_prod_proxy`) should report status `Up` or `Up (healthy)`.
+
+### Step 5: Database Migrations & Initial Admin Account
+Database migrations run automatically during backend container startup (`alembic upgrade head`).
+
+To safely bootstrap your first production tenant and Admin user without using public registration:
+```bash
+docker compose -f docker-compose.prod.yml exec backend python scripts/create_admin.py \
+  --org "Acme Logistics Global" \
+  --email "admin@acmelogistics.com" \
+  --password "SecureProductionPassword123!"
+```
+
+### Step 6: Verification & Health Checks
+Verify backend API health:
+```bash
+curl -f http://localhost/api/v1/health
+```
+Expected output:
+```json
+{"status":"healthy","service":"Smart Inventory Management & Demand Forecasting","environment":"production"}
+```
+
+Verify frontend health:
+```bash
+curl -I http://localhost/
+```
+Expected output:
+```
+HTTP/1.1 200 OK
+```
+
+### Step 7: Zero-Downtime Updates & Backups
+To safely deploy new code changes in the future:
+```bash
+git pull origin master
+docker compose -f docker-compose.prod.yml build
+docker compose -f docker-compose.prod.yml up -d --no-deps backend frontend
+```
+
+To create an immediate database backup:
+```bash
+docker compose -f docker-compose.prod.yml exec -T postgres pg_dump -U smart_inv_admin smart_inventory_prod > backup_$(date +%Y%m%d_%H%M%S).sql
+```
+
