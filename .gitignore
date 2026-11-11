@@ -69,3 +69,6 @@ ssl/**/*.pem
 Thumbs.db
 .vscode/
 .idea/
+
+!frontend/src/lib/
+!frontend/src/lib/**
