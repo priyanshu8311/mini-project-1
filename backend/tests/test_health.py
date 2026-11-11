@@ -14,6 +14,33 @@ async def test_health_endpoint(async_client: AsyncClient) -> None:
 
 
 @pytest.mark.asyncio
+async def test_root_health_endpoint(async_client: AsyncClient) -> None:
+    """Verify that the root /health endpoint returns expected targeted payload."""
+    response = await async_client.get("/health")
+    assert response.status_code == 200
+    assert response.json() == {
+        "status": "healthy",
+        "service": "smart-inventory-api",
+    }
+
+
+@pytest.mark.asyncio
+async def test_docs_and_openapi_endpoints(async_client: AsyncClient) -> None:
+    """Verify that OpenAPI schema and Swagger docs are accessible and return 200."""
+    openapi_res = await async_client.get("/api/v1/openapi.json")
+    assert openapi_res.status_code == 200
+    schema = openapi_res.json()
+    assert "openapi" in schema
+    assert "paths" in schema
+    assert "/health" in schema["paths"]
+    assert "/api/v1/health" in schema["paths"]
+
+    docs_res = await async_client.get("/api/v1/docs")
+    assert docs_res.status_code == 200
+    assert "swagger-ui" in docs_res.text.lower()
+
+
+@pytest.mark.asyncio
 async def test_not_found_standard_error(async_client: AsyncClient) -> None:
     """Verify that non-existent routes return the standardized error envelope."""
     response = await async_client.get("/api/v1/unknown-endpoint")

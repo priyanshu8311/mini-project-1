@@ -1,0 +1,55 @@
+# ==============================================================================
+# Render Blueprint Specification (render.yaml)
+# https://render.com/docs/blueprint-spec
+# ==============================================================================
+
+databases:
+  - name: smart-inventory-db
+    plan: free
+    region: oregon
+    databaseName: smart_inventory
+    user: smart_inv_admin
+
+services:
+  # --- FastAPI Backend Web Service ---
+  - type: web
+    name: smart-inventory-backend
+    env: python
+    region: oregon
+    plan: free
+    branch: master
+    buildCommand: "pip install -r backend/requirements.txt"
+    startCommand: "sh scripts/render-start.sh"
+    healthCheckPath: "/api/v1/health"
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+      - key: LOG_LEVEL
+        value: INFO
+      - key: DATABASE_URL
+        fromDatabase:
+          name: smart-inventory-db
+          property: connectionString
+      - key: JWT_SECRET_KEY
+        generateValue: true
+      - key: ENCRYPTION_KEY
+        generateValue: true
+      - key: ALLOWED_ORIGINS
+        value: "https://smart-inventory-frontend.onrender.com,http://localhost:3000"
+
+  # --- Next.js Frontend Web Service ---
+  - type: web
+    name: smart-inventory-frontend
+    env: node
+    region: oregon
+    plan: free
+    branch: master
+    rootDir: frontend
+    buildCommand: "npm ci && npm run build"
+    startCommand: "npm run start"
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NEXT_PUBLIC_API_URL
+        value: "https://smart-inventory-backend.onrender.com/api/v1"
+

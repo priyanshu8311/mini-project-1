@@ -1,6 +1,8 @@
+import os
 from collections.abc import AsyncGenerator
 
 import pytest
+from backend.src.core.config import settings
 from backend.src.core.database import Base, get_db_session
 from backend.src.core.rate_limit import login_rate_limiter
 from backend.src.core.security import create_access_token
@@ -9,6 +11,10 @@ from backend.src.domain.users.service import UserService
 from backend.src.main import app
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+
+# Enforce testing environment for test suite
+os.environ["ENVIRONMENT"] = "testing"
+settings.ENVIRONMENT = "testing"
 
 # In-memory SQLite async test database
 TEST_DB_URL = "sqlite+aiosqlite:///:memory:"
