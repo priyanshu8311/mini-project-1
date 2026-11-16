@@ -20,7 +20,7 @@ services:
     branch: master
     buildCommand: "pip install -r backend/requirements.txt"
     startCommand: "sh scripts/render-start.sh"
-    healthCheckPath: "/api/v1/health"
+    healthCheckPath: "/health"
     envVars:
       - key: ENVIRONMENT
         value: production
