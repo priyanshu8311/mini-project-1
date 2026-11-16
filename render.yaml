@@ -51,5 +51,5 @@ services:
       - key: NODE_ENV
         value: production
       - key: NEXT_PUBLIC_API_URL
-        value: "https://smart-inventory-backend.onrender.com/api/v1"
+        value: "https://mini-project-1-3-mq5z.onrender.com/api/v1"
 

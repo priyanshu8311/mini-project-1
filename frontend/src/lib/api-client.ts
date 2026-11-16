@@ -108,7 +108,76 @@ export interface ShopifySyncResponse {
 }
 
 
-const BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000/api/v1";
+const DEFAULT_API_BASE_URL = "https://mini-project-1-3-mq5z.onrender.com/api/v1";
+
+/**
+ * Resolves and sanitizes the base API URL.
+ * Handles:
+ * - process.env.NEXT_PUBLIC_API_URL
+ * - Fallback to https://mini-project-1-3-mq5z.onrender.com/api/v1
+ * - Strips accidental assignment prefix "NEXT_PUBLIC_API_URL=" inside env values
+ * - Strips enclosing quotes
+ * - Strips trailing slashes
+ * - Ensures /api/v1 is present without duplication
+ */
+export function getApiBaseUrl(): string {
+  let raw = process.env.NEXT_PUBLIC_API_URL;
+
+  if (!raw || typeof raw !== "string") {
+    return DEFAULT_API_BASE_URL;
+  }
+
+  raw = raw.trim();
+
+  // Strip accidental "NEXT_PUBLIC_API_URL=" prefix if pasted into Vercel/env value
+  if (raw.startsWith("NEXT_PUBLIC_API_URL=")) {
+    raw = raw.slice("NEXT_PUBLIC_API_URL=".length).trim();
+  }
+
+  // Strip enclosing single or double quotes
+  raw = raw.replace(/^["']|["']$/g, "").trim();
+
+  // Remove trailing slashes
+  raw = raw.replace(/\/+$/, "");
+
+  if (!raw) {
+    return DEFAULT_API_BASE_URL;
+  }
+
+  // Ensure /api/v1 suffix is present and not duplicated
+  if (!raw.endsWith("/api/v1")) {
+    if (raw.endsWith("/api")) {
+      raw = `${raw}/v1`;
+    } else {
+      raw = `${raw}/api/v1`;
+    }
+  }
+
+  return raw;
+}
+
+export const BASE_URL = getApiBaseUrl();
+
+/**
+ * Builds a clean, fully-qualified URL for an API endpoint without duplicate slashes or duplicated /api/v1.
+ */
+export function buildApiUrl(endpoint: string): string {
+  const base = getApiBaseUrl();
+  let cleanEndpoint = (endpoint || "").trim();
+
+  // Strip leading slash for consistent segment joining
+  cleanEndpoint = cleanEndpoint.replace(/^\/+/, "");
+
+  // Strip leading /api/v1 or api/v1 if caller passed it
+  if (cleanEndpoint.startsWith("api/v1/")) {
+    cleanEndpoint = cleanEndpoint.slice("api/v1/".length);
+  } else if (cleanEndpoint === "api/v1") {
+    cleanEndpoint = "";
+  }
+
+  return cleanEndpoint ? `${base}/${cleanEndpoint}` : base;
+}
+
 const TOKEN_STORAGE_KEY = "smart_inventory_auth_token";
 
 export function getAuthToken(): string | null {
@@ -132,7 +201,7 @@ export async function apiClient<T>(
   endpoint: string,
   options: RequestInit = {}
 ): Promise<T> {
-  const url = `${BASE_URL}${endpoint.startsWith("/") ? endpoint : `/${endpoint}`}`;
+  const url = buildApiUrl(endpoint);
 
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
