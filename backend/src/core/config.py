@@ -90,7 +90,9 @@ class Settings(BaseSettings):
     )
 
     # CORS
-    ALLOWED_ORIGINS: str = "http://localhost:3000,http://127.0.0.1:3000"
+    ALLOWED_ORIGINS: str = (
+        "http://localhost:3000,http://127.0.0.1:3000,https://mini-project-1-orpin.vercel.app"
+    )
 
     @field_validator("DATABASE_URL", mode="before")
     @classmethod
@@ -102,8 +104,25 @@ class Settings(BaseSettings):
 
     @property
     def cors_origins(self) -> list[str]:
-        """Parse comma-separated origins into a list."""
-        return [origin.strip() for origin in self.ALLOWED_ORIGINS.split(",") if origin.strip()]
+        """Parse comma-separated origins into a list without duplicates or invalid wildcards."""
+        parsed = [origin.strip() for origin in self.ALLOWED_ORIGINS.split(",") if origin.strip()]
+
+        # Explicitly ensure production Vercel frontend origin is always present
+        production_vercel = "https://mini-project-1-orpin.vercel.app"
+        if production_vercel not in parsed:
+            parsed.append(production_vercel)
+
+        # Disallow wildcard '*' when allow_credentials=True (CORS security standard)
+        origins = [o for o in parsed if o != "*"]
+
+        # Deduplicate while preserving order
+        seen = set()
+        deduped: list[str] = []
+        for o in origins:
+            if o not in seen:
+                seen.add(o)
+                deduped.append(o)
+        return deduped
 
     @property
     def is_production(self) -> bool:

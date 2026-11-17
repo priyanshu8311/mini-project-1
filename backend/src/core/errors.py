@@ -93,10 +93,15 @@ def format_error_response(
 
 def _cors_headers(request: Request) -> dict[str, str]:
     """Helper to ensure CORS headers are present on exception responses."""
+    import re
+
     from backend.src.core.config import settings
 
     origin = request.headers.get("origin")
-    if origin and (origin in settings.cors_origins or "*" in settings.cors_origins):
+    if origin and (
+        origin in settings.cors_origins
+        or re.match(r"^https:\/\/mini-project-1.*\.vercel\.app$", origin)
+    ):
         return {
             "Access-Control-Allow-Origin": origin,
             "Access-Control-Allow-Credentials": "true",
