@@ -74,10 +74,19 @@ def create_application() -> FastAPI:
         response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
         return response
 
-    # Register CORS Middleware
+    # Register CORS Middleware with explicit production Vercel frontend origin
+    cors_allowed_origins = list(
+        dict.fromkeys(
+            [
+                "https://mini-project-1-orpin.vercel.app",
+                *[o for o in settings.cors_origins if o != "*"],
+            ]
+        )
+    )
+
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=settings.cors_origins,
+        allow_origins=cors_allowed_origins,
         allow_origin_regex=r"^https:\/\/mini-project-1.*\.vercel\.app$",
         allow_credentials=True,
         allow_methods=["*"],
