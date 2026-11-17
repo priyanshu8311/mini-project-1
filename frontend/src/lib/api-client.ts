@@ -76,6 +76,21 @@ export interface UserDeleteResponse {
   email: string;
 }
 
+export interface SkuDeleteResponse {
+  message: string;
+  sku_id: string;
+  sku_code: string;
+  action: "deleted" | "archived";
+}
+
+export interface SkuUpdatePayload {
+  sku_code?: string;
+  supplier_id?: string | null;
+  unit_cost?: number | string;
+  sales_price?: number | string;
+  lead_time_days?: number;
+}
+
 export interface ShopifyConfigResponse {
   id: string;
   tenant_id: string;

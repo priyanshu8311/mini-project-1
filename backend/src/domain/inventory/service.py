@@ -1,11 +1,13 @@
+import logging
 import math
 from uuid import UUID
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from backend.src.core.errors import ConflictException, NotFoundException, ValidationException
+from backend.src.domain.forecasting.models import DemandForecast, SalesHistory
 from backend.src.domain.inventory.models import (
     SKU,
     Category,
@@ -24,9 +26,13 @@ from backend.src.domain.inventory.schemas import (
     PaginationMeta,
     ProductCreate,
     SKUCreate,
+    SKUDeleteResponse,
     SKUResponse,
     SKUUpdate,
 )
+from backend.src.domain.purchasing.models import POItem, PurchaseOrder
+
+logger = logging.getLogger("smart_inventory.catalog")
 
 
 class CatalogService:
@@ -268,6 +274,7 @@ class CatalogService:
             unit_cost=sku.unit_cost,
             sales_price=sku.sales_price,
             lead_time_days=sku.lead_time_days,
+            is_active=getattr(sku, "is_active", True),
             created_at=sku.created_at,
             product_name=sku.product.name if sku.product else None,
             category_name=cat_name,
@@ -281,6 +288,7 @@ class CatalogService:
         limit: int = 50,
         search: str | None = None,
         category_id: UUID | None = None,
+        include_archived: bool = False,
         sort_by: str = "created_at",
         sort_order: str = "desc",
     ) -> tuple[list[SKUResponse], PaginationMeta]:
@@ -296,6 +304,9 @@ class CatalogService:
             .where(SKU.tenant_id == tenant_id)
             .options(selectinload(SKU.product).selectinload(Product.category))
         )
+
+        if not include_archived:
+            query = query.where(SKU.is_active.is_(True))
 
         if category_id:
             query = query.where(Product.category_id == category_id)
@@ -318,6 +329,8 @@ class CatalogService:
             .join(Product, SKU.product_id == Product.id)
             .where(SKU.tenant_id == tenant_id)
         )
+        if not include_archived:
+            count_query = count_query.where(SKU.is_active.is_(True))
         if category_id:
             count_query = count_query.where(Product.category_id == category_id)
         if search:
@@ -420,6 +433,132 @@ class CatalogService:
         await db.refresh(sku)
 
         return CatalogService._to_sku_response(sku)
+
+    @staticmethod
+    async def delete_sku(
+        db: AsyncSession,
+        tenant_id: UUID,
+        sku_id: UUID,
+        actor_user_id: UUID | None = None,
+    ) -> SKUDeleteResponse:
+        """Delete or archive a SKU variant ensuring tenant isolation and dependency safety.
+
+        Rules:
+        1. Tenant-level isolation: SKU must exist and belong to the authenticated tenant.
+        2. Stock on hand: If any inventory_level has on_hand > 0, reject deletion.
+        3. Business dependencies: Check inventory_transactions, po_items, sales_history, and demand_forecasts.
+        4. Soft deletion / archive: If dependencies exist, set is_active = False to preserve ledger/audit integrity.
+        5. Permanent deletion: If zero business dependencies exist, clean up zero-stock inventory_levels and delete SKU.
+        """
+        # 1. Fetch SKU ensuring tenant isolation
+        result = await db.execute(
+            select(SKU).where(SKU.id == sku_id, SKU.tenant_id == tenant_id)
+        )
+        sku = result.scalar_one_or_none()
+        if not sku:
+            raise NotFoundException("SKU", sku_id)
+
+        # 2. Check physical stock levels across all locations
+        stock_res = await db.execute(
+            select(
+                func.coalesce(func.sum(InventoryLevel.on_hand), 0),
+                func.coalesce(func.sum(InventoryLevel.reserved), 0),
+            ).where(
+                InventoryLevel.sku_id == sku_id,
+                InventoryLevel.tenant_id == tenant_id,
+            )
+        )
+        total_on_hand, total_reserved = stock_res.one()
+        if total_on_hand > 0:
+            raise ValidationException(
+                f"Cannot delete SKU '{sku.sku_code}' with active stock on hand ({total_on_hand} units). "
+                "Please adjust or transfer physical stock to 0 before deleting."
+            )
+
+        # 3. Check for business dependencies across ledger, purchasing, sales, and forecasting
+        tx_count_res = await db.execute(
+            select(func.count(InventoryTransaction.id)).where(
+                InventoryTransaction.sku_id == sku_id,
+                InventoryTransaction.tenant_id == tenant_id,
+            )
+        )
+        tx_count = tx_count_res.scalar_one()
+
+        po_count_res = await db.execute(
+            select(func.count(POItem.id))
+            .join(PurchaseOrder, POItem.po_id == PurchaseOrder.id)
+            .where(
+                POItem.sku_id == sku_id,
+                PurchaseOrder.tenant_id == tenant_id,
+            )
+        )
+        po_count = po_count_res.scalar_one()
+
+        sales_count_res = await db.execute(
+            select(func.count(SalesHistory.id)).where(
+                SalesHistory.sku_id == sku_id,
+                SalesHistory.tenant_id == tenant_id,
+            )
+        )
+        sales_count = sales_count_res.scalar_one()
+
+        forecast_count_res = await db.execute(
+            select(func.count(DemandForecast.id)).where(
+                DemandForecast.sku_id == sku_id,
+                DemandForecast.tenant_id == tenant_id,
+            )
+        )
+        forecast_count = forecast_count_res.scalar_one()
+
+        has_dependencies = (
+            tx_count > 0 or po_count > 0 or sales_count > 0 or forecast_count > 0
+        )
+
+        if has_dependencies:
+            # Soft-delete / Archive
+            sku.is_active = False
+            await db.flush()
+            logger.info(
+                "SKU '%s' (%s) archived/soft-deleted by actor %s in tenant %s (dependencies: %d tx, %d po, %d sales, %d forecasts)",
+                sku.sku_code,
+                sku.id,
+                actor_user_id,
+                tenant_id,
+                tx_count,
+                po_count,
+                sales_count,
+                forecast_count,
+            )
+            return SKUDeleteResponse(
+                message=f"SKU '{sku.sku_code}' has transaction history and has been archived (soft-deleted).",
+                sku_id=sku.id,
+                sku_code=sku.sku_code,
+                action="archived",
+            )
+
+        # 4. No dependencies: clean up any zero-stock inventory_level records and permanently delete
+        await db.execute(
+            delete(InventoryLevel).where(
+                InventoryLevel.sku_id == sku_id,
+                InventoryLevel.tenant_id == tenant_id,
+            )
+        )
+        sku_code = sku.sku_code
+        await db.delete(sku)
+        await db.flush()
+        logger.info(
+            "SKU '%s' (%s) permanently deleted by actor %s in tenant %s (zero dependencies)",
+            sku_code,
+            sku_id,
+            actor_user_id,
+            tenant_id,
+        )
+        return SKUDeleteResponse(
+            message=f"SKU '{sku_code}' has been permanently deleted successfully.",
+            sku_id=sku_id,
+            sku_code=sku_code,
+            action="deleted",
+        )
 
 
 class InventoryService:

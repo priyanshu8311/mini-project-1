@@ -1,7 +1,12 @@
 from decimal import Decimal
 
 import pytest
-from backend.src.domain.inventory.models import LocationType
+from backend.src.domain.inventory.models import (
+    InventoryLevel,
+    InventoryTransaction,
+    Location,
+    LocationType,
+)
 from backend.src.domain.inventory.schemas import CategoryCreate, SKUCreate
 from backend.src.domain.inventory.service import CatalogService
 from backend.src.domain.users.models import Tenant
@@ -318,3 +323,250 @@ async def test_rbac_sku_write_permissions(
     assert resp.status_code == 403
     error_data = resp.json()
     assert error_data["error"]["code"] == "FORBIDDEN"
+
+
+@pytest.mark.asyncio
+async def test_permanent_delete_sku_without_dependencies(
+    async_client: AsyncClient,
+    admin_token: str,
+    db_session: AsyncSession,
+    test_tenant: Tenant,
+) -> None:
+    """Verify permanent deletion of a SKU that has zero transactions or dependencies."""
+    cat = await CatalogService.create_category(
+        db_session,
+        test_tenant.id,
+        CategoryCreate(name="Packaging"),
+    )
+    sku_item = await CatalogService.create_sku(
+        db_session,
+        test_tenant.id,
+        SKUCreate(
+            sku_code="PKG-BOX-SMALL",
+            product_name="Small Cardboard Box",
+            category_id=cat.id,
+            unit_cost=Decimal("0.50"),
+            sales_price=Decimal("1.50"),
+        ),
+    )
+    await db_session.commit()
+
+    # Delete SKU
+    delete_resp = await async_client.delete(
+        f"/api/v1/products/skus/{sku_item.id}",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert delete_resp.status_code == 200
+    del_data = delete_resp.json()
+    assert del_data["action"] == "deleted"
+    assert del_data["sku_code"] == "PKG-BOX-SMALL"
+    assert "permanently deleted" in del_data["message"].lower()
+
+    # Verify SKU is gone from database
+    get_resp = await async_client.get(
+        f"/api/v1/products/skus/{sku_item.id}",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert get_resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_soft_delete_sku_with_transaction_history(
+    async_client: AsyncClient,
+    admin_token: str,
+    db_session: AsyncSession,
+    test_tenant: Tenant,
+) -> None:
+    """Verify soft-deletion (archive) when SKU has historical ledger transactions."""
+    cat = await CatalogService.create_category(
+        db_session,
+        test_tenant.id,
+        CategoryCreate(name="Lighting"),
+    )
+    sku_item = await CatalogService.create_sku(
+        db_session,
+        test_tenant.id,
+        SKUCreate(
+            sku_code="LGT-BULB-LED",
+            product_name="LED Bulb 9W",
+            category_id=cat.id,
+            unit_cost=Decimal("1.00"),
+            sales_price=Decimal("3.50"),
+        ),
+    )
+    loc = Location(
+        tenant_id=test_tenant.id,
+        name="Main Warehouse",
+        type=LocationType.WAREHOUSE.value,
+    )
+    db_session.add(loc)
+    await db_session.flush()
+
+    # Create historical transaction for this SKU
+    tx = InventoryTransaction(
+        tenant_id=test_tenant.id,
+        sku_id=sku_item.id,
+        location_id=loc.id,
+        transaction_type="Adjust",
+        quantity_change=5,
+        reason="Stock audit receipt",
+    )
+    db_session.add(tx)
+    await db_session.commit()
+    tx_id = tx.id
+
+    # Admin deletes SKU
+    delete_resp = await async_client.delete(
+        f"/api/v1/products/skus/{sku_item.id}",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert delete_resp.status_code == 200
+    del_data = delete_resp.json()
+    assert del_data["action"] == "archived"
+    assert del_data["sku_code"] == "LGT-BULB-LED"
+    assert "archived" in del_data["message"].lower()
+
+    # Verify historical transaction is safely preserved
+    db_session.expire_all()
+    preserved_tx = await db_session.get(InventoryTransaction, tx_id)
+    assert preserved_tx is not None
+    assert preserved_tx.sku_id == sku_item.id
+
+    # Verify active list excludes the archived SKU
+    list_resp = await async_client.get(
+        "/api/v1/products/skus?search=LGT-BULB-LED",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert list_resp.status_code == 200
+    assert len(list_resp.json()["data"]) == 0
+
+    # Verify query with include_archived returns it marked as inactive
+    archived_list_resp = await async_client.get(
+        "/api/v1/products/skus?search=LGT-BULB-LED&include_archived=true",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert archived_list_resp.status_code == 200
+    archived_data = archived_list_resp.json()["data"]
+    assert len(archived_data) == 1
+    assert archived_data[0]["is_active"] is False
+
+
+@pytest.mark.asyncio
+async def test_delete_sku_rejected_when_stock_on_hand_positive(
+    async_client: AsyncClient,
+    admin_token: str,
+    db_session: AsyncSession,
+    test_tenant: Tenant,
+) -> None:
+    """Verify deletion is blocked (400 Bad Request) if SKU has active physical stock."""
+    cat = await CatalogService.create_category(
+        db_session,
+        test_tenant.id,
+        CategoryCreate(name="Storage"),
+    )
+    sku_item = await CatalogService.create_sku(
+        db_session,
+        test_tenant.id,
+        SKUCreate(
+            sku_code="STR-BIN-01",
+            product_name="Plastic Storage Bin",
+            category_id=cat.id,
+            unit_cost=Decimal("4.00"),
+            sales_price=Decimal("12.00"),
+        ),
+    )
+    loc = Location(
+        tenant_id=test_tenant.id,
+        name="Dallas Depot",
+        type=LocationType.WAREHOUSE.value,
+    )
+    db_session.add(loc)
+    await db_session.flush()
+
+    # Create inventory level with on_hand = 15
+    inv_level = InventoryLevel(
+        tenant_id=test_tenant.id,
+        sku_id=sku_item.id,
+        location_id=loc.id,
+        on_hand=15,
+        reserved=0,
+    )
+    db_session.add(inv_level)
+    await db_session.commit()
+
+    # Attempt delete
+    delete_resp = await async_client.delete(
+        f"/api/v1/products/skus/{sku_item.id}",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert delete_resp.status_code == 400
+    error_data = delete_resp.json()
+    assert error_data["error"]["code"] == "VALIDATION_ERROR"
+    assert "15 units" in error_data["error"]["message"]
+
+
+@pytest.mark.asyncio
+async def test_rbac_sku_delete_permissions(
+    async_client: AsyncClient,
+    viewer_token: str,
+    admin_token: str,
+    db_session: AsyncSession,
+    test_tenant: Tenant,
+) -> None:
+    """Verify unauthorized roles (Viewer) receive 403 Forbidden on SKU deletion."""
+    cat = await CatalogService.create_category(
+        db_session,
+        test_tenant.id,
+        CategoryCreate(name="Safety Gear"),
+    )
+    sku_item = await CatalogService.create_sku(
+        db_session,
+        test_tenant.id,
+        SKUCreate(
+            sku_code="SFT-GLOVES-01",
+            product_name="Nitrile Gloves Pack",
+            category_id=cat.id,
+        ),
+    )
+    await db_session.commit()
+
+    # Viewer tries to delete -> 403
+    viewer_resp = await async_client.delete(
+        f"/api/v1/products/skus/{sku_item.id}",
+        headers={"Authorization": f"Bearer {viewer_token}"},
+    )
+    assert viewer_resp.status_code == 403
+    assert viewer_resp.json()["error"]["code"] == "FORBIDDEN"
+
+
+@pytest.mark.asyncio
+async def test_cross_tenant_isolation_sku_delete(
+    async_client: AsyncClient,
+    admin_token: str,
+    db_session: AsyncSession,
+) -> None:
+    """Verify Admin in Tenant A cannot delete SKU belonging to Tenant B (404 Not Found)."""
+    tenant_b = await UserService.create_tenant(db_session, name="Tenant B Logistics")
+    cat_b = await CatalogService.create_category(
+        db_session,
+        tenant_b.id,
+        CategoryCreate(name="Tenant B Cat"),
+    )
+    sku_b = await CatalogService.create_sku(
+        db_session,
+        tenant_b.id,
+        SKUCreate(
+            sku_code="TENANT-B-SKU",
+            product_name="Exclusive Item",
+            category_id=cat_b.id,
+        ),
+    )
+    await db_session.commit()
+
+    # Tenant A admin attempts to delete Tenant B SKU -> 404
+    delete_resp = await async_client.delete(
+        f"/api/v1/products/skus/{sku_b.id}",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert delete_resp.status_code == 404
+    assert delete_resp.json()["error"]["code"] == "NOT_FOUND"

@@ -113,11 +113,21 @@ class SKUResponse(BaseModel):
     unit_cost: Decimal
     sales_price: Decimal
     lead_time_days: int
+    is_active: bool = True
     created_at: datetime
     product_name: str | None = None
     category_name: str | None = None
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class SKUDeleteResponse(BaseModel):
+    """Response returned upon deleting or archiving a SKU."""
+
+    message: str
+    sku_id: UUID
+    sku_code: str
+    action: str  # "deleted" | "archived"
 
 
 # --- Locations ---

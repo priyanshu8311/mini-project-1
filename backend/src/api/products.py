@@ -12,11 +12,12 @@ from backend.src.domain.inventory.schemas import (
     ProductCreate,
     ProductResponse,
     SKUCreate,
+    SKUDeleteResponse,
     SKUResponse,
     SKUUpdate,
 )
 from backend.src.domain.inventory.service import CatalogService
-from backend.src.domain.users.models import UserRole
+from backend.src.domain.users.models import User, UserRole
 
 products_router = APIRouter(prefix="/products", tags=["Product & SKU Management"])
 
@@ -35,6 +36,7 @@ async def list_skus(
     limit: int = Query(default=50, ge=1, le=100, description="Items per page"),
     search: str | None = Query(default=None, description="Search by SKU code or product name"),
     category_id: UUID | None = Query(default=None, description="Filter by category ID"),
+    include_archived: bool = Query(default=False, description="Include archived/soft-deleted SKUs"),
     sort_by: str = Query(default="created_at", description="Sort column"),
     sort_order: str = Query(default="desc", pattern="^(asc|desc)$", description="Sort order"),
     tenant_id: UUID = Depends(get_current_tenant_id),
@@ -48,6 +50,7 @@ async def list_skus(
         limit=limit,
         search=search,
         category_id=category_id,
+        include_archived=include_archived,
         sort_by=sort_by,
         sort_order=sort_order,
     )
@@ -112,6 +115,27 @@ async def update_sku(
         tenant_id=tenant_id,
         sku_id=id,
         payload=payload,
+    )
+
+
+@products_router.delete(
+    "/skus/{id}",
+    response_model=SKUDeleteResponse,
+    status_code=status.HTTP_200_OK,
+    dependencies=[Depends(require_roles(CATALOG_WRITE_ROLES))],
+    summary="Delete or archive a SKU variant",
+)
+async def delete_sku(
+    id: UUID,
+    current_user: User = Depends(require_roles(CATALOG_WRITE_ROLES)),
+    db: AsyncSession = Depends(get_db_session),
+) -> SKUDeleteResponse:
+    """Delete or archive a SKU adhering to business dependency rules."""
+    return await CatalogService.delete_sku(
+        db=db,
+        tenant_id=current_user.tenant_id,
+        sku_id=id,
+        actor_user_id=current_user.id,
     )
 
 

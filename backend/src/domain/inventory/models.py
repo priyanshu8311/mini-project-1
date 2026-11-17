@@ -4,6 +4,7 @@ from decimal import Decimal
 from typing import TYPE_CHECKING
 
 from sqlalchemy import (
+    Boolean,
     CheckConstraint,
     Computed,
     ForeignKey,
@@ -125,6 +126,7 @@ class SKU(BaseModel):
         default=Decimal("0.00"),
     )
     lead_time_days: Mapped[int] = mapped_column(Integer, nullable=False, default=7)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False, server_default="true")
 
     # Relationships
     product: Mapped["Product"] = relationship("Product", back_populates="skus")

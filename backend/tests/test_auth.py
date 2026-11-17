@@ -563,7 +563,7 @@ async def test_successful_permanent_user_deletion(
     assert get_resp.status_code == 404
 
     # 6. Verify that historical transaction is preserved and actor is set to None (Deleted User)
-    await db_session.expire_all()
+    db_session.expire_all()
     tx_check = await db_session.get(InventoryTransaction, tx_id)
     assert tx_check is not None
     assert tx_check.user_id is None

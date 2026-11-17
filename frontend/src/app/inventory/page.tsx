@@ -10,12 +10,18 @@ import {
   AlertTriangle,
   Clock,
   ArrowRightLeft,
+  Edit2,
+  Trash2,
+  CheckCircle2,
+  X,
 } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Badge } from "@/components/ui/Badge";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/Card";
 import { DataTable, ColumnDef } from "@/components/ui/DataTable";
 import { CreateSkuModal, CategoryOption } from "@/components/inventory/CreateSkuModal";
+import { EditSkuModal } from "@/components/inventory/EditSkuModal";
+import { DeleteSkuModal } from "@/components/inventory/DeleteSkuModal";
 import { AdjustStockModal } from "@/components/inventory/AdjustStockModal";
 import { TransferStockModal } from "@/components/inventory/TransferStockModal";
 import { apiClient } from "@/lib/api-client";
@@ -30,6 +36,7 @@ export interface SkuItem {
   unit_cost: string | number;
   sales_price: string | number;
   lead_time_days: number;
+  is_active?: boolean;
   created_at: string;
   product_name?: string | null;
   category_name?: string | null;
@@ -64,6 +71,11 @@ export default function InventoryPage() {
   const [isModalOpen, setIsModalOpen] = useState<boolean>(false);
   const [isAdjustModalOpen, setIsAdjustModalOpen] = useState<boolean>(false);
   const [isTransferModalOpen, setIsTransferModalOpen] = useState<boolean>(false);
+  const [skuToDelete, setSkuToDelete] = useState<SkuItem | null>(null);
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState<boolean>(false);
+  const [skuToEdit, setSkuToEdit] = useState<SkuItem | null>(null);
+  const [isEditModalOpen, setIsEditModalOpen] = useState<boolean>(false);
+  const [actionSuccess, setActionSuccess] = useState<string | null>(null);
 
   // Debounce search input
   useEffect(() => {
@@ -141,6 +153,18 @@ export default function InventoryPage() {
     }).format(num);
   };
 
+  const handleOpenEditModal = (item: SkuItem) => {
+    setActionSuccess(null);
+    setSkuToEdit(item);
+    setIsEditModalOpen(true);
+  };
+
+  const handleOpenDeleteModal = (item: SkuItem) => {
+    setActionSuccess(null);
+    setSkuToDelete(item);
+    setIsDeleteModalOpen(true);
+  };
+
   const columns: ColumnDef<SkuItem>[] = [
     {
       header: "SKU Code",
@@ -214,16 +238,71 @@ export default function InventoryPage() {
     {
       header: "Status",
       align: "center",
-      cell: () => (
-        <Badge variant="success" className="text-[11px]">
-          Active
+      cell: (row) => (
+        <Badge
+          variant={row.is_active === false ? "neutral" : "success"}
+          className="text-[11px]"
+        >
+          {row.is_active === false ? "Archived" : "Active"}
         </Badge>
       ),
     },
+    ...(canWriteCatalog
+      ? [
+          {
+            header: "Actions",
+            align: "right" as const,
+            cell: (row: SkuItem) => (
+              <div className="flex items-center justify-end gap-1.5">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handleOpenEditModal(row)}
+                  title={`Edit SKU ${row.sku_code}`}
+                  className="h-7 px-2 text-xs text-[#334155] border-[#cbd5e1] hover:bg-[#f1f5f9]"
+                >
+                  <Edit2 className="w-3.5 h-3.5 mr-1 text-[#64748b]" />
+                  Edit
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => handleOpenDeleteModal(row)}
+                  title={`Delete SKU ${row.sku_code}`}
+                  className="h-7 px-2 text-xs text-[#dc2626] border-[#fecaca] hover:bg-[#fef2f2] hover:border-[#dc2626]"
+                >
+                  <Trash2 className="w-3.5 h-3.5 mr-1 text-[#dc2626]" />
+                  Delete
+                </Button>
+              </div>
+            ),
+          },
+        ]
+      : []),
   ];
 
   return (
     <div className="space-y-6">
+      {actionSuccess && (
+        <div
+          role="status"
+          className="p-3.5 rounded-lg bg-[#f0fdf4] border border-[#bbf7d0] text-[#166534] text-xs flex items-center justify-between shadow-sm animate-in fade-in"
+        >
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 shrink-0 text-[#16a34a]" />
+            <span className="font-medium">{actionSuccess}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setActionSuccess(null)}
+            className="p-1 rounded text-[#166534] hover:bg-[#dcfce7]"
+            aria-label="Dismiss message"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
       {/* Top Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div>
@@ -431,6 +510,34 @@ export default function InventoryPage() {
         onSuccess={() => {
           refetchSkus();
         }}
+      />
+
+      {/* Delete SKU Confirmation Modal */}
+      <DeleteSkuModal
+        isOpen={isDeleteModalOpen}
+        onClose={() => {
+          setIsDeleteModalOpen(false);
+          setSkuToDelete(null);
+        }}
+        onSuccess={(msg) => {
+          setActionSuccess(msg);
+          refetchSkus();
+        }}
+        sku={skuToDelete}
+      />
+
+      {/* Edit SKU Modal */}
+      <EditSkuModal
+        isOpen={isEditModalOpen}
+        onClose={() => {
+          setIsEditModalOpen(false);
+          setSkuToEdit(null);
+        }}
+        onSuccess={() => {
+          setActionSuccess("SKU updated successfully.");
+          refetchSkus();
+        }}
+        sku={skuToEdit}
       />
     </div>
   );
