@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   AlertCircle,
+  AlertTriangle,
   ArrowLeft,
   CheckCircle2,
   Lock,
@@ -12,6 +13,7 @@ import {
   Plus,
   Shield,
   ShieldAlert,
+  Trash2,
   UserCheck,
   UserX,
   Users,
@@ -20,6 +22,7 @@ import {
 import { useAuth } from "@/hooks/useAuth";
 import {
   apiClient,
+  type UserDeleteResponse,
   type UserListResponse,
   type UserResponse,
 } from "@/lib/api-client";
@@ -73,6 +76,11 @@ export default function UserManagementPage() {
   const [newPassword, setNewPassword] = useState("");
   const [newRole, setNewRole] = useState("Viewer");
   const [modalError, setModalError] = useState<string | null>(null);
+
+  // Modal State for Permanently Deleting User
+  const [userToDelete, setUserToDelete] = useState<UserResponse | null>(null);
+  const [deleteConfirmationText, setDeleteConfirmationText] = useState("");
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   // React Query for tenant users
   const {
@@ -152,6 +160,66 @@ export default function UserManagementPage() {
       userId: userToUpdate.id,
       isActive: !userToUpdate.is_active,
     });
+  };
+
+  // Delete User Mutation
+  const deleteUserMutation = useMutation({
+    mutationFn: (userId: string) =>
+      apiClient<UserDeleteResponse>(`/users/${userId}`, {
+        method: "DELETE",
+      }),
+    onSuccess: (data) => {
+      setActionSuccess(
+        data.message || `User '${data.email}' has been permanently deleted.`
+      );
+      setUserToDelete(null);
+      setDeleteConfirmationText("");
+      setDeleteError(null);
+      queryClient.invalidateQueries({ queryKey: ["users"] });
+    },
+    onError: (err) => {
+      setDeleteError(
+        err instanceof Error ? err.message : "Failed to permanently delete user."
+      );
+    },
+  });
+
+  const handleOpenDeleteModal = (targetUser: UserResponse) => {
+    setActionSuccess(null);
+    setError(null);
+    setDeleteError(null);
+    setDeleteConfirmationText("");
+
+    if (targetUser.id === currentUser?.id) {
+      setError("You cannot delete your own administrative account.");
+      return;
+    }
+
+    const adminCount = users.filter((u) => u.role === "Admin").length;
+    if (targetUser.role === "Admin" && adminCount <= 1) {
+      setError("Cannot delete the last remaining Administrator in the organization.");
+      return;
+    }
+
+    setUserToDelete(targetUser);
+  };
+
+  const handleConfirmDelete = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!userToDelete) return;
+
+    if (
+      deleteConfirmationText.trim().toLowerCase() !==
+      userToDelete.email.trim().toLowerCase()
+    ) {
+      setDeleteError(
+        `Please type the exact email '${userToDelete.email}' to confirm deletion.`
+      );
+      return;
+    }
+
+    setDeleteError(null);
+    deleteUserMutation.mutate(userToDelete.id);
   };
 
   // 403 Forbidden State if non-admin accesses this route
@@ -343,28 +411,41 @@ export default function UserManagementPage() {
                               Active Admin
                             </span>
                           ) : (
-                            <Button
-                              variant={u.is_active ? "ghost" : "outline"}
-                              size="sm"
-                              onClick={() => handleToggleStatus(u)}
-                              className={
-                                u.is_active
-                                  ? "text-[#dc2626] hover:bg-[#fef2f2] hover:text-[#b91c1c]"
-                                  : "text-[#16a34a] hover:bg-[#f0fdf4]"
-                              }
-                            >
-                              {u.is_active ? (
-                                <>
-                                  <UserX className="w-3.5 h-3.5 mr-1" />
-                                  Deactivate
-                                </>
-                              ) : (
-                                <>
-                                  <UserCheck className="w-3.5 h-3.5 mr-1" />
-                                  Activate
-                                </>
-                              )}
-                            </Button>
+                            <div className="flex items-center justify-end gap-1.5">
+                              <Button
+                                variant={u.is_active ? "ghost" : "outline"}
+                                size="sm"
+                                onClick={() => handleToggleStatus(u)}
+                                className={
+                                  u.is_active
+                                    ? "text-[#64748b] hover:bg-[#f1f5f9] hover:text-[#0f172a]"
+                                    : "text-[#16a34a] hover:bg-[#f0fdf4]"
+                                }
+                              >
+                                {u.is_active ? (
+                                  <>
+                                    <UserX className="w-3.5 h-3.5 mr-1" />
+                                    Deactivate
+                                  </>
+                                ) : (
+                                  <>
+                                    <UserCheck className="w-3.5 h-3.5 mr-1" />
+                                    Activate
+                                  </>
+                                )}
+                              </Button>
+
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => handleOpenDeleteModal(u)}
+                                className="text-[#dc2626] border-[#fecaca] hover:bg-[#fef2f2] hover:text-[#b91c1c] hover:border-[#fca5a5]"
+                                title={`Permanently delete user ${u.email}`}
+                              >
+                                <Trash2 className="w-3.5 h-3.5 mr-1" />
+                                Delete User
+                              </Button>
+                            </div>
                           )}
                         </td>
                       </tr>
@@ -519,6 +600,119 @@ export default function UserManagementPage() {
                   isLoading={createUserMutation.isPending}
                 >
                   Provision User
+                </Button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Permanent Delete User Confirmation */}
+      {userToDelete && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full border border-[#fecaca] overflow-hidden">
+            <div className="p-4 bg-[#fef2f2] border-b border-[#fecaca] flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-full bg-[#fee2e2] text-[#dc2626] flex items-center justify-center">
+                  <AlertTriangle className="w-4 h-4" />
+                </div>
+                <h2 className="text-sm font-bold text-[#991b1b]">
+                  Permanently Delete User Account
+                </h2>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setUserToDelete(null);
+                  setDeleteError(null);
+                  setDeleteConfirmationText("");
+                }}
+                className="p-1 rounded text-[#991b1b] hover:bg-[#fee2e2]"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleConfirmDelete} className="p-4 space-y-4">
+              {deleteError && (
+                <div
+                  role="alert"
+                  className="p-3 rounded bg-[#fef2f2] border border-[#fecaca] text-[#dc2626] text-xs flex items-start gap-2"
+                >
+                  <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                  <span>{deleteError}</span>
+                </div>
+              )}
+
+              <div className="space-y-2">
+                <p className="text-xs text-[#334155] leading-relaxed">
+                  Are you sure you want to permanently delete this user account from your workspace?
+                </p>
+                <div className="p-3 bg-[#f8fafc] border border-[#e2e8f0] rounded flex items-center justify-between">
+                  <div>
+                    <p className="text-xs font-bold text-[#0f172a]">{userToDelete.email}</p>
+                    <p className="text-[11px] text-[#64748b]">Role: {userToDelete.role}</p>
+                  </div>
+                  <Badge variant="error">Permanent Deletion</Badge>
+                </div>
+              </div>
+
+              <div className="p-3 rounded bg-[#fffbeb] border border-[#fef3c7] text-[#92400e] text-[11px] space-y-1">
+                <p className="font-semibold flex items-center gap-1.5">
+                  <ShieldAlert className="w-3.5 h-3.5 shrink-0" />
+                  Security & Audit Trail Protection
+                </p>
+                <p>
+                  Active login sessions and refresh tokens will be immediately revoked. Historical inventory transactions, purchase orders, and audit logs will be safely preserved and attributed to your administrative account.
+                </p>
+              </div>
+
+              <div className="space-y-1.5">
+                <label
+                  htmlFor="confirmEmailInput"
+                  className="block text-xs font-semibold text-[#0f172a]"
+                >
+                  Type <span className="font-mono text-[#dc2626] font-bold">{userToDelete.email}</span> to confirm:
+                </label>
+                <input
+                  id="confirmEmailInput"
+                  type="text"
+                  required
+                  autoFocus
+                  value={deleteConfirmationText}
+                  onChange={(e) => setDeleteConfirmationText(e.target.value)}
+                  placeholder={userToDelete.email}
+                  className="w-full h-9 px-3 text-xs bg-white border border-[#cbd5e1] rounded-[4px] focus:outline-none focus:border-[#dc2626]"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-3 border-t border-[#f1f5f9]">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setUserToDelete(null);
+                    setDeleteError(null);
+                    setDeleteConfirmationText("");
+                  }}
+                  disabled={deleteUserMutation.isPending}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="submit"
+                  size="sm"
+                  disabled={
+                    deleteConfirmationText.trim().toLowerCase() !==
+                      userToDelete.email.trim().toLowerCase() ||
+                    deleteUserMutation.isPending
+                  }
+                  isLoading={deleteUserMutation.isPending}
+                  className="bg-[#dc2626] hover:bg-[#b91c1c] text-white focus:ring-[#dc2626]"
+                >
+                  <Trash2 className="w-3.5 h-3.5 mr-1.5" />
+                  Permanently Delete User
                 </Button>
               </div>
             </form>

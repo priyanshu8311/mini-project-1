@@ -446,3 +446,110 @@ async def test_cross_tenant_isolation(
         headers={"Authorization": f"Bearer {admin_token}"},
     )
     assert not_found_resp.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_delete_user_authorization_and_isolation(
+    async_client: AsyncClient,
+    db_session: AsyncSession,
+    test_tenant: Tenant,
+    test_admin_user: User,
+    test_viewer_user: User,
+    admin_token: str,
+    viewer_token: str,
+) -> None:
+    """Verify authorization, RBAC, tenant isolation, and business rule enforcement on DELETE /api/v1/users/{id}."""
+    # 1. Non-Admin (Viewer) cannot delete a user -> 403 Forbidden
+    unauthorized_resp = await async_client.delete(
+        f"/api/v1/users/{test_viewer_user.id}",
+        headers={"Authorization": f"Bearer {viewer_token}"},
+    )
+    assert unauthorized_resp.status_code == 403
+
+    # 2. Admin cannot delete their own account -> 400 Validation Error
+    self_delete_resp = await async_client.delete(
+        f"/api/v1/users/{test_admin_user.id}",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert self_delete_resp.status_code == 400
+    assert "cannot delete their own account" in self_delete_resp.json()["error"]["message"]
+
+    # 3. Create second tenant and user to test tenant isolation
+    tenant_b = await UserService.create_tenant(db_session, name="Tenant Beta")
+    user_b = await UserService.create_user(
+        db_session,
+        tenant_id=tenant_b.id,
+        email="beta_user@tenantb.com",
+        password="Password123!",
+        role=UserRole.INVENTORY_MANAGER,
+    )
+    await db_session.commit()
+
+    # Admin from Tenant A cannot delete user from Tenant B -> 404 Not Found
+    cross_delete_resp = await async_client.delete(
+        f"/api/v1/users/{user_b.id}",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert cross_delete_resp.status_code == 404
+
+    # 4. Cannot delete the last Admin in tenant
+    last_admin_delete = await async_client.delete(
+        f"/api/v1/users/{test_admin_user.id}",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert last_admin_delete.status_code == 400
+
+
+@pytest.mark.asyncio
+async def test_successful_permanent_user_deletion(
+    async_client: AsyncClient,
+    db_session: AsyncSession,
+    test_tenant: Tenant,
+    test_admin_user: User,
+    admin_token: str,
+) -> None:
+    """Verify permanent deletion of an Inventory Manager user account and revocation of active tokens."""
+    # 1. Create target Inventory Manager user
+    manager_user = await UserService.create_user(
+        db_session,
+        tenant_id=test_tenant.id,
+        email="inventory_manager@acme.com",
+        password="Password123!",
+        role=UserRole.INVENTORY_MANAGER,
+    )
+    await db_session.commit()
+
+    # 2. Issue a token for this user to test revocation after deletion
+    manager_token = create_access_token(
+        data={
+            "sub": str(manager_user.id),
+            "tenant_id": str(manager_user.tenant_id),
+            "role": manager_user.role,
+            "email": manager_user.email,
+        }
+    )
+
+    # 3. Perform permanent deletion via Admin
+    delete_resp = await async_client.delete(
+        f"/api/v1/users/{manager_user.id}",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert delete_resp.status_code == 200
+    del_data = delete_resp.json()
+    assert del_data["email"] == "inventory_manager@acme.com"
+    assert "permanently deleted successfully" in del_data["message"]
+
+    # 4. Confirm user no longer exists in DB / GET returns 404
+    get_resp = await async_client.get(
+        f"/api/v1/users/{manager_user.id}",
+        headers={"Authorization": f"Bearer {admin_token}"},
+    )
+    assert get_resp.status_code == 404
+
+    # 5. Confirm session revocation: deleted user token immediately rejected
+    revoked_resp = await async_client.get(
+        "/api/v1/users/me",
+        headers={"Authorization": f"Bearer {manager_token}"},
+    )
+    assert revoked_resp.status_code == 401
+    assert "no longer exists" in revoked_resp.json()["error"]["message"]

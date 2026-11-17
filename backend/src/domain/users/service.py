@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.src.core.errors import (
@@ -11,6 +11,7 @@ from backend.src.core.errors import (
 )
 from backend.src.core.security import hash_password, verify_password
 from backend.src.domain.users.models import Tenant, User, UserRole
+from backend.src.domain.users.schemas import UserDeleteResponse
 
 
 class UserService:
@@ -174,3 +175,61 @@ class UserService:
             )
 
         return user
+
+    @staticmethod
+    async def delete_user(
+        db: AsyncSession,
+        user_id: UUID,
+        tenant_id: UUID,
+        actor_user_id: UUID,
+    ) -> UserDeleteResponse:
+        """Permanently delete a user account within the tenant organization.
+
+        Ensures:
+        - Self-deletion is prevented.
+        - Deletion of the last remaining Admin in the tenant is prohibited.
+        - Historical inventory transactions are preserved by reassigning their user_id
+          to the acting Administrator, preventing foreign-key violations and preserving the audit trail.
+        - The deletion is performed transactionally.
+        """
+        if user_id == actor_user_id:
+            raise ValidationException("Administrators cannot delete their own account.")
+
+        user = await UserService.get_user_by_id(db, user_id=user_id, tenant_id=tenant_id)
+
+        # Invariant: If target user is an Admin, ensure at least one other Admin exists in this tenant
+        if user.role == UserRole.ADMIN.value:
+            admin_count_query = select(func.count(User.id)).where(
+                User.tenant_id == tenant_id,
+                User.role == UserRole.ADMIN.value,
+            )
+            admin_count = (await db.execute(admin_count_query)).scalar() or 0
+            if admin_count <= 1:
+                raise ValidationException(
+                    "Cannot delete the last remaining Administrator in the organization."
+                )
+
+        deleted_email = user.email
+        deleted_id = user.id
+
+        # Preserve historical inventory transactions by reassigning foreign-key reference
+        # to the acting administrator, safely satisfying the RESTRICT constraint without cascade-deleting records
+        from backend.src.domain.inventory.models import InventoryTransaction
+
+        await db.execute(
+            update(InventoryTransaction)
+            .where(
+                InventoryTransaction.tenant_id == tenant_id,
+                InventoryTransaction.user_id == user_id,
+            )
+            .values(user_id=actor_user_id)
+        )
+
+        await db.delete(user)
+        await db.flush()
+
+        return UserDeleteResponse(
+            message=f"User '{deleted_email}' permanently deleted successfully.",
+            user_id=deleted_id,
+            email=deleted_email,
+        )

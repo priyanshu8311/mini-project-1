@@ -11,6 +11,7 @@ from backend.src.domain.users.service import UserService
 from backend.src.main import app
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.pool import StaticPool
 
 # Enforce testing environment for test suite
 os.environ["ENVIRONMENT"] = "testing"
@@ -22,6 +23,7 @@ TEST_DB_URL = "sqlite+aiosqlite:///:memory:"
 test_engine = create_async_engine(
     TEST_DB_URL,
     connect_args={"check_same_thread": False},
+    poolclass=StaticPool,
     future=True,
 )
 

@@ -52,14 +52,23 @@ class BaseModel(Base):
 
 
 # Configure Async SQLAlchemy Engine with bounded production connection pooling
+_engine_kwargs: dict = {
+    "echo": settings.LOG_LEVEL.upper() == "DEBUG",
+    "future": True,
+}
+if "sqlite" not in settings.DATABASE_URL:
+    _engine_kwargs.update(
+        {
+            "pool_pre_ping": True,
+            "pool_size": 10,
+            "max_overflow": 20,
+            "pool_recycle": 3600,
+        }
+    )
+
 engine = create_async_engine(
     settings.DATABASE_URL,
-    echo=settings.LOG_LEVEL.upper() == "DEBUG",
-    future=True,
-    pool_pre_ping=True,
-    pool_size=10,
-    max_overflow=20,
-    pool_recycle=3600,
+    **_engine_kwargs,
 )
 
 # Configure Async Sessionmaker

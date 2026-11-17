@@ -65,6 +65,12 @@ export interface LogoutResponse {
   message: string;
 }
 
+export interface UserDeleteResponse {
+  message: string;
+  user_id: string;
+  email: string;
+}
+
 export interface ShopifyConfigResponse {
   id: string;
   tenant_id: string;

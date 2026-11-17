@@ -98,3 +98,11 @@ class LogoutResponse(BaseModel):
     """Acknowledgment payload for session logout."""
 
     message: str = "Logged out successfully"
+
+
+class UserDeleteResponse(BaseModel):
+    """Response payload for permanent user account deletion."""
+
+    message: str
+    user_id: UUID
+    email: str

@@ -8,6 +8,7 @@ from backend.src.core.database import get_db_session
 from backend.src.domain.users.models import User, UserRole
 from backend.src.domain.users.schemas import (
     UserCreate,
+    UserDeleteResponse,
     UserListResponse,
     UserResponse,
     UserStatusUpdate,
@@ -127,3 +128,23 @@ async def update_user_status(
         actor_user_id=current_admin.id,
     )
     return UserResponse.model_validate(updated_user)
+
+
+@users_router.delete(
+    "/{user_id}",
+    response_model=UserDeleteResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Permanently delete a user account within tenant (Admin only)",
+)
+async def delete_user(
+    user_id: UUID,
+    current_admin: User = Depends(require_roles([UserRole.ADMIN.value])),
+    db: AsyncSession = Depends(get_db_session),
+) -> UserDeleteResponse:
+    """Permanently delete a user account while safely preserving audit and transaction history."""
+    return await UserService.delete_user(
+        db=db,
+        user_id=user_id,
+        tenant_id=current_admin.tenant_id,
+        actor_user_id=current_admin.id,
+    )
