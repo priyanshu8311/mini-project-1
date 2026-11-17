@@ -8,6 +8,7 @@ import {
   AlertTriangle,
   ArrowLeft,
   CheckCircle2,
+  Edit2,
   Lock,
   Mail,
   Plus,
@@ -25,6 +26,7 @@ import {
   type UserDeleteResponse,
   type UserListResponse,
   type UserResponse,
+  type UserUpdatePayload,
 } from "@/lib/api-client";
 import { Button } from "@/components/ui/Button";
 import {
@@ -81,6 +83,12 @@ export default function UserManagementPage() {
   const [userToDelete, setUserToDelete] = useState<UserResponse | null>(null);
   const [deleteConfirmationText, setDeleteConfirmationText] = useState("");
   const [deleteError, setDeleteError] = useState<string | null>(null);
+
+  // Modal State for Editing User (Change Role & Status)
+  const [userToEdit, setUserToEdit] = useState<UserResponse | null>(null);
+  const [editRole, setEditRole] = useState<string>("Viewer");
+  const [editIsActive, setEditIsActive] = useState<boolean>(true);
+  const [editError, setEditError] = useState<string | null>(null);
 
   // React Query for tenant users
   const {
@@ -220,6 +228,74 @@ export default function UserManagementPage() {
 
     setDeleteError(null);
     deleteUserMutation.mutate(userToDelete.id);
+  };
+
+  // Edit User Mutation (Role & Status)
+  const editUserMutation = useMutation({
+    mutationFn: ({
+      userId,
+      payload,
+    }: {
+      userId: string;
+      payload: UserUpdatePayload;
+    }) =>
+      apiClient<UserResponse>(`/users/${userId}`, {
+        method: "PATCH",
+        body: JSON.stringify(payload),
+      }),
+    onSuccess: (data) => {
+      setActionSuccess(`User '${data.email}' updated successfully.`);
+      setUserToEdit(null);
+      setEditError(null);
+      queryClient.invalidateQueries({ queryKey: ["users"] });
+    },
+    onError: (err) => {
+      setEditError(
+        err instanceof Error ? err.message : "Failed to update user."
+      );
+    },
+  });
+
+  const handleOpenEditModal = (targetUser: UserResponse) => {
+    setActionSuccess(null);
+    setError(null);
+    setEditError(null);
+    setUserToEdit(targetUser);
+    setEditRole(targetUser.role);
+    setEditIsActive(targetUser.is_active);
+  };
+
+  const handleSaveEditUser = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!userToEdit) return;
+
+    // Check last admin demotion
+    const adminCount = users.filter((u) => u.role === "Admin").length;
+    if (
+      userToEdit.role === "Admin" &&
+      editRole !== "Admin" &&
+      adminCount <= 1
+    ) {
+      setEditError(
+        "Cannot change the role of the last remaining Administrator in the organization."
+      );
+      return;
+    }
+
+    // Check self deactivation
+    if (userToEdit.id === currentUser?.id && !editIsActive) {
+      setEditError("You cannot deactivate your own administrative account.");
+      return;
+    }
+
+    setEditError(null);
+    editUserMutation.mutate({
+      userId: userToEdit.id,
+      payload: {
+        role: editRole,
+        is_active: editIsActive,
+      },
+    });
   };
 
   // 403 Forbidden State if non-admin accesses this route
@@ -412,6 +488,17 @@ export default function UserManagementPage() {
                             </span>
                           ) : (
                             <div className="flex items-center justify-end gap-1.5">
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => handleOpenEditModal(u)}
+                                className="text-[#2563eb] border-[#bfdbfe] hover:bg-[#eff6ff] hover:text-[#1d4ed8]"
+                                title={`Edit role and account settings for ${u.email}`}
+                              >
+                                <Edit2 className="w-3.5 h-3.5 mr-1" />
+                                Edit
+                              </Button>
+
                               <Button
                                 variant={u.is_active ? "ghost" : "outline"}
                                 size="sm"
@@ -663,7 +750,7 @@ export default function UserManagementPage() {
                   Security & Audit Trail Protection
                 </p>
                 <p>
-                  Active login sessions and refresh tokens will be immediately revoked. Historical inventory transactions, purchase orders, and audit logs will be safely preserved and attributed to your administrative account.
+                  Active login sessions and refresh tokens will be immediately revoked. Historical business transactions and audit logs will be safely preserved and displayed as &quot;Deleted User&quot;.
                 </p>
               </div>
 
@@ -713,6 +800,129 @@ export default function UserManagementPage() {
                 >
                   <Trash2 className="w-3.5 h-3.5 mr-1.5" />
                   Permanently Delete User
+                </Button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Edit User Role & Account Status */}
+      {userToEdit && (
+        <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full border border-[#e2e8f0] overflow-hidden">
+            <div className="p-4 border-b border-[#e2e8f0] flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-full bg-[#eff6ff] text-[#2563eb] flex items-center justify-center">
+                  <Edit2 className="w-4 h-4" />
+                </div>
+                <h2 className="text-sm font-bold text-[#0f172a]">
+                  Edit Team Member & Roles
+                </h2>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  setUserToEdit(null);
+                  setEditError(null);
+                }}
+                className="p-1 rounded text-[#94a3b8] hover:text-[#0f172a]"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveEditUser} className="p-4 space-y-4">
+              {editError && (
+                <div
+                  role="alert"
+                  className="p-3 rounded bg-[#fef2f2] border border-[#fecaca] text-[#dc2626] text-xs flex items-start gap-2"
+                >
+                  <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                  <span>{editError}</span>
+                </div>
+              )}
+
+              {/* User Email (Read-Only) */}
+              <div className="space-y-1">
+                <label className="block text-xs font-semibold text-[#0f172a]">
+                  Work Email
+                </label>
+                <div className="relative">
+                  <Mail className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-[#94a3b8]" />
+                  <input
+                    type="email"
+                    disabled
+                    value={userToEdit.email}
+                    className="w-full h-9 pl-9 pr-3 text-xs bg-[#f8fafc] border border-[#e2e8f0] rounded-[4px] text-[#64748b] cursor-not-allowed"
+                  />
+                </div>
+              </div>
+
+              {/* Assigned Role */}
+              <div className="space-y-1">
+                <label
+                  htmlFor="editMemberRole"
+                  className="block text-xs font-semibold text-[#0f172a]"
+                >
+                  Assigned Role <span className="text-[#dc2626]">*</span>
+                </label>
+                <select
+                  id="editMemberRole"
+                  value={editRole}
+                  onChange={(e) => setEditRole(e.target.value)}
+                  className="w-full h-9 px-3 text-xs bg-white border border-[#cbd5e1] rounded-[4px] focus:outline-none focus:border-[#2563eb]"
+                >
+                  {SYSTEM_ROLES.map((r) => (
+                    <option key={r.role} value={r.role}>
+                      {r.role}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-[10px] text-[#64748b]">
+                  {SYSTEM_ROLES.find((r) => r.role === editRole)?.description}
+                </p>
+              </div>
+
+              {/* Account Status Toggle */}
+              <div className="pt-2 border-t border-[#f1f5f9]">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={editIsActive}
+                    onChange={(e) => setEditIsActive(e.target.checked)}
+                    className="w-4 h-4 text-[#2563eb] rounded border-[#cbd5e1] focus:ring-[#2563eb]"
+                  />
+                  <span className="text-xs font-medium text-[#0f172a]">
+                    Account is Active
+                  </span>
+                </label>
+                <p className="text-[10px] text-[#64748b] ml-6 mt-0.5">
+                  Deactivated accounts cannot authenticate or access the workspace.
+                </p>
+              </div>
+
+              {/* Modal Actions */}
+              <div className="flex items-center justify-end gap-2 pt-3 border-t border-[#f1f5f9]">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setUserToEdit(null);
+                    setEditError(null);
+                  }}
+                  disabled={editUserMutation.isPending}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="submit"
+                  variant="primary"
+                  size="sm"
+                  isLoading={editUserMutation.isPending}
+                >
+                  Save Changes
                 </Button>
               </div>
             </form>

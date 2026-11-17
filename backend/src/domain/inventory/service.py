@@ -501,7 +501,7 @@ class InventoryService:
         sku_code = tx.sku.sku_code if tx.sku else None
         prod_name = tx.sku.product.name if tx.sku and tx.sku.product else None
         loc_name = tx.location.name if tx.location else None
-        user_email = tx.user.email if tx.user else None
+        user_email = tx.user.email if tx.user else "Deleted User"
         return InventoryTransactionResponse(
             id=tx.id,
             tenant_id=tx.tenant_id,

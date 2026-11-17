@@ -12,6 +12,7 @@ from backend.src.domain.users.schemas import (
     UserListResponse,
     UserResponse,
     UserStatusUpdate,
+    UserUpdate,
 )
 from backend.src.domain.users.service import UserService
 
@@ -105,6 +106,30 @@ async def get_user_by_id(
         tenant_id=current_admin.tenant_id,
     )
     return UserResponse.model_validate(user)
+
+
+@users_router.patch(
+    "/{user_id}",
+    response_model=UserResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Update user role or account status within tenant (Admin only)",
+)
+async def update_user(
+    user_id: UUID,
+    payload: UserUpdate,
+    current_admin: User = Depends(require_roles([UserRole.ADMIN.value])),
+    db: AsyncSession = Depends(get_db_session),
+) -> UserResponse:
+    """Update user role or active status with RBAC enforcement and Admin invariants."""
+    updated_user = await UserService.update_user(
+        db=db,
+        user_id=user_id,
+        tenant_id=current_admin.tenant_id,
+        actor_user_id=current_admin.id,
+        role=payload.role,
+        is_active=payload.is_active,
+    )
+    return UserResponse.model_validate(updated_user)
 
 
 @users_router.patch(

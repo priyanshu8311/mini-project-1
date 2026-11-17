@@ -61,6 +61,11 @@ export interface UserStatusUpdatePayload {
   is_active: boolean;
 }
 
+export interface UserUpdatePayload {
+  role?: string;
+  is_active?: boolean;
+}
+
 export interface LogoutResponse {
   message: string;
 }

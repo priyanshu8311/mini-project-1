@@ -87,6 +87,13 @@ class UserStatusUpdate(BaseModel):
     is_active: bool = Field(..., description="New active status")
 
 
+class UserUpdate(BaseModel):
+    """Payload for updating user role or active status within a tenant."""
+
+    role: UserRole | None = Field(default=None, description="New assigned role")
+    is_active: bool | None = Field(default=None, description="New account active status")
+
+
 class UserListResponse(BaseModel):
     """Paginated or listed collection of users within a tenant."""
 

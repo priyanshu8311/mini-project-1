@@ -198,7 +198,7 @@ class InventoryTransactionResponse(BaseModel):
     tenant_id: UUID
     sku_id: UUID
     location_id: UUID
-    user_id: UUID
+    user_id: UUID | None = None
     transaction_type: str
     quantity_change: int
     reference_id: str | None

@@ -529,7 +529,23 @@ async def test_successful_permanent_user_deletion(
         }
     )
 
-    # 3. Perform permanent deletion via Admin
+    # 3. Create a historical inventory transaction associated with this user
+    from backend.src.domain.inventory.models import InventoryTransaction
+
+    tx = InventoryTransaction(
+        tenant_id=test_tenant.id,
+        sku_id=uuid4(),
+        location_id=uuid4(),
+        user_id=manager_user.id,
+        transaction_type="Adjust",
+        quantity_change=10,
+        reason="Initial manager stock count",
+    )
+    db_session.add(tx)
+    await db_session.commit()
+    tx_id = tx.id
+
+    # 4. Perform permanent deletion via Admin
     delete_resp = await async_client.delete(
         f"/api/v1/users/{manager_user.id}",
         headers={"Authorization": f"Bearer {admin_token}"},
@@ -539,17 +555,71 @@ async def test_successful_permanent_user_deletion(
     assert del_data["email"] == "inventory_manager@acme.com"
     assert "permanently deleted successfully" in del_data["message"]
 
-    # 4. Confirm user no longer exists in DB / GET returns 404
+    # 5. Confirm user no longer exists in DB / GET returns 404
     get_resp = await async_client.get(
         f"/api/v1/users/{manager_user.id}",
         headers={"Authorization": f"Bearer {admin_token}"},
     )
     assert get_resp.status_code == 404
 
-    # 5. Confirm session revocation: deleted user token immediately rejected
+    # 6. Verify that historical transaction is preserved and actor is set to None (Deleted User)
+    await db_session.expire_all()
+    tx_check = await db_session.get(InventoryTransaction, tx_id)
+    assert tx_check is not None
+    assert tx_check.user_id is None
+    assert tx_check.quantity_change == 10
+
+    # 7. Confirm session revocation: deleted user token immediately rejected
     revoked_resp = await async_client.get(
         "/api/v1/users/me",
         headers={"Authorization": f"Bearer {manager_token}"},
     )
     assert revoked_resp.status_code == 401
     assert "no longer exists" in revoked_resp.json()["error"]["message"]
+
+
+@pytest.mark.asyncio
+async def test_update_user_role_and_status(
+    async_client: AsyncClient,
+    db_session: AsyncSession,
+    test_tenant: Tenant,
+    test_admin_user: User,
+    admin_token: str,
+    viewer_token: str,
+) -> None:
+    """Verify that Admin can edit and change user roles, while non-admins are forbidden."""
+    # 1. Create a user to edit
+    user = await UserService.create_user(
+        db_session,
+        tenant_id=test_tenant.id,
+        email="operator@acme.com",
+        password="Password123!",
+        role=UserRole.VIEWER,
+    )
+    await db_session.commit()
+
+    # 2. Viewer cannot change roles -> 403 Forbidden
+    forbidden_resp = await async_client.patch(
+        f"/api/v1/users/{user.id}",
+        headers={"Authorization": f"Bearer {viewer_token}"},
+        json={"role": UserRole.INVENTORY_MANAGER.value},
+    )
+    assert forbidden_resp.status_code == 403
+
+    # 3. Admin can change role to Inventory Manager
+    promote_resp = await async_client.patch(
+        f"/api/v1/users/{user.id}",
+        headers={"Authorization": f"Bearer {admin_token}"},
+        json={"role": UserRole.INVENTORY_MANAGER.value},
+    )
+    assert promote_resp.status_code == 200
+    assert promote_resp.json()["role"] == UserRole.INVENTORY_MANAGER.value
+
+    # 4. Cannot demote the last remaining Admin
+    demote_admin_resp = await async_client.patch(
+        f"/api/v1/users/{test_admin_user.id}",
+        headers={"Authorization": f"Bearer {admin_token}"},
+        json={"role": UserRole.VIEWER.value},
+    )
+    assert demote_admin_resp.status_code == 400
+    assert "last remaining Administrator" in demote_admin_resp.json()["error"]["message"]

@@ -158,6 +158,44 @@ class UserService:
         return user
 
     @staticmethod
+    async def update_user(
+        db: AsyncSession,
+        user_id: UUID,
+        tenant_id: UUID,
+        actor_user_id: UUID,
+        role: UserRole | str | None = None,
+        is_active: bool | None = None,
+    ) -> User:
+        """Update an existing user's role or status within the tenant with RBAC safeguards."""
+        user = await UserService.get_user_by_id(db, user_id=user_id, tenant_id=tenant_id)
+
+        # Invariant 1: Prevent self-deactivation
+        if user_id == actor_user_id and is_active is False:
+            raise ValidationException("Administrators cannot deactivate their own account.")
+
+        # Invariant 2: If demoting an Admin to another role, verify at least one other Admin exists
+        if role is not None:
+            new_role_val = role.value if isinstance(role, UserRole) else str(role)
+            if user.role == UserRole.ADMIN.value and new_role_val != UserRole.ADMIN.value:
+                admin_count_query = select(func.count(User.id)).where(
+                    User.tenant_id == tenant_id,
+                    User.role == UserRole.ADMIN.value,
+                )
+                admin_count = (await db.execute(admin_count_query)).scalar() or 0
+                if admin_count <= 1:
+                    raise ValidationException(
+                        "Cannot change the role of the last remaining Administrator in the organization."
+                    )
+            user.role = new_role_val
+
+        if is_active is not None:
+            user.is_active = is_active
+
+        await db.flush()
+        await db.refresh(user)
+        return user
+
+    @staticmethod
     async def authenticate_user(
         db: AsyncSession,
         email: str,
@@ -212,8 +250,9 @@ class UserService:
         deleted_email = user.email
         deleted_id = user.id
 
-        # Preserve historical inventory transactions by reassigning foreign-key reference
-        # to the acting administrator, safely satisfying the RESTRICT constraint without cascade-deleting records
+        # Preserve historical inventory transactions and audit integrity.
+        # Reassign user_id to None so that the ledger record is permanently preserved
+        # and displays the actor as "Deleted User", safely satisfying foreign-key constraints.
         from backend.src.domain.inventory.models import InventoryTransaction
 
         await db.execute(
@@ -222,7 +261,7 @@ class UserService:
                 InventoryTransaction.tenant_id == tenant_id,
                 InventoryTransaction.user_id == user_id,
             )
-            .values(user_id=actor_user_id)
+            .values(user_id=None)
         )
 
         await db.delete(user)
