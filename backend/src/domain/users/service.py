@@ -63,6 +63,17 @@ class UserService:
             is_active=True,
         )
         db.add(user)
+
+        from backend.src.domain.inventory.models import Location, LocationType
+
+        default_location = Location(
+            tenant_id=tenant.id,
+            name="Main Warehouse",
+            type=LocationType.WAREHOUSE.value,
+            address="Primary Facility",
+        )
+        db.add(default_location)
+
         await db.flush()
         await db.refresh(tenant)
         await db.refresh(user)

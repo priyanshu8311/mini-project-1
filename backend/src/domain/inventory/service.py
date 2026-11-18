@@ -14,6 +14,7 @@ from backend.src.domain.inventory.models import (
     InventoryLevel,
     InventoryTransaction,
     Location,
+    LocationType,
     Product,
     TransactionType,
 )
@@ -154,11 +155,23 @@ class CatalogService:
         db: AsyncSession,
         tenant_id: UUID,
     ) -> list[Location]:
-        """List all physical locations for a tenant."""
+        """List all physical locations for a tenant, auto-creating a default warehouse if none exist."""
         result = await db.execute(
             select(Location).where(Location.tenant_id == tenant_id).order_by(Location.name.asc())
         )
-        return list(result.scalars().all())
+        locations = list(result.scalars().all())
+        if not locations:
+            default_location = Location(
+                tenant_id=tenant_id,
+                name="Main Warehouse",
+                type=LocationType.WAREHOUSE.value,
+                address="Primary Facility",
+            )
+            db.add(default_location)
+            await db.flush()
+            await db.refresh(default_location)
+            locations = [default_location]
+        return locations
 
     @staticmethod
     async def get_location_by_id(

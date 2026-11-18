@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import { X, AlertCircle, ArrowRightLeft } from "lucide-react";
+import { X, AlertCircle, ArrowRightLeft, Plus } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { apiClient, ApiError } from "@/lib/api-client";
 
@@ -26,6 +26,9 @@ export function TransferStockModal({
   const [quantity, setQuantity] = useState("1");
   const [reason, setReason] = useState("Inter-warehouse rebalancing");
   const [locations, setLocations] = useState<Array<{ id: string; name: string }>>([]);
+  const [isLocationsLoaded, setIsLocationsLoaded] = useState(false);
+  const [isCreatingLocation, setIsCreatingLocation] = useState(false);
+  const isLoadingLocations = !isLocationsLoaded;
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
@@ -35,22 +38,76 @@ export function TransferStockModal({
     if (initialSkuId) setSkuId(initialSkuId);
   }
 
+  const createLocation = async (name: string, type: "Warehouse" | "Store", address: string) => {
+    setIsCreatingLocation(true);
+    try {
+      const created = await apiClient<{ id: string; name: string }>("/locations", {
+        method: "POST",
+        body: JSON.stringify({ name, type, address }),
+      });
+      setLocations((prev) => {
+        const next = prev.some((l) => l.id === created.id) ? prev : [...prev, created];
+        if (next.length >= 2) {
+          setSourceLocId((curr) => curr || next[0].id);
+          setTargetLocId((curr) => (curr && curr !== next[0].id ? curr : next[1].id));
+        } else if (next.length === 1) {
+          setSourceLocId((curr) => curr || next[0].id);
+        }
+        return next;
+      });
+    } catch (err: unknown) {
+      if (err instanceof ApiError) {
+        setErrorMsg(`Failed to setup location: ${err.message}`);
+      } else {
+        setErrorMsg("Failed to setup location.");
+      }
+    } finally {
+      setIsCreatingLocation(false);
+    }
+  };
+
   useEffect(() => {
     if (!isOpen) return;
     let isCancelled = false;
     apiClient<Array<{ id: string; name: string }>>("/locations")
-      .then((res) => {
-        if (!isCancelled) {
+      .then(async (res) => {
+        if (isCancelled) return;
+        if (res && res.length > 0) {
           setLocations(res);
           if (res.length >= 2) {
             setSourceLocId((curr) => curr || res[0].id);
-            setTargetLocId((curr) => curr || res[1].id);
+            setTargetLocId((curr) => (curr && curr !== res[0].id ? curr : res[1].id));
           } else if (res.length === 1) {
             setSourceLocId((curr) => curr || res[0].id);
           }
+        } else {
+          try {
+            const created = await apiClient<{ id: string; name: string }>("/locations", {
+              method: "POST",
+              body: JSON.stringify({
+                name: "Main Warehouse",
+                type: "Warehouse",
+                address: "Primary Facility",
+              }),
+            });
+            if (!isCancelled) {
+              setLocations([created]);
+              setSourceLocId(created.id);
+            }
+          } catch {
+            // Handled gracefully
+          }
         }
       })
-      .catch(() => {});
+      .catch((err) => {
+        console.error("Failed to load locations", err);
+      })
+      .finally(() => {
+        if (!isCancelled) {
+          setIsLocationsLoaded(true);
+        }
+      });
+
     return () => {
       isCancelled = true;
     };
@@ -158,6 +215,21 @@ export function TransferStockModal({
             </div>
           )}
 
+          {locations.length < 2 && !isLoadingLocations && (
+            <div className="rounded-lg border border-[#fde68a] bg-[#fffbeb] p-3 text-xs text-[#92400e] flex items-center justify-between">
+              <span>Stock transfer requires at least 2 locations.</span>
+              <button
+                type="button"
+                onClick={() => createLocation("Retail Storefront", "Store", "Storefront Facility")}
+                disabled={isCreatingLocation}
+                className="inline-flex items-center gap-1 font-semibold underline ml-2 hover:text-[#78350f] disabled:opacity-50"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>{isCreatingLocation ? "Creating..." : "Add Secondary Location"}</span>
+              </button>
+            </div>
+          )}
+
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-xs font-semibold text-[#334155] uppercase tracking-wider mb-1.5">
@@ -167,13 +239,20 @@ export function TransferStockModal({
                 required
                 value={sourceLocId}
                 onChange={(e) => setSourceLocId(e.target.value)}
-                className="w-full rounded-lg border border-[#cbd5e1] px-3 py-2 text-sm text-[#0f172a] focus:border-[#2563eb] focus:outline-none focus:ring-1 focus:ring-[#2563eb]"
+                disabled={isLoadingLocations || isCreatingLocation || locations.length === 0}
+                className="w-full rounded-lg border border-[#cbd5e1] px-3 py-2 text-sm text-[#0f172a] focus:border-[#2563eb] focus:outline-none focus:ring-1 focus:ring-[#2563eb] disabled:bg-[#f1f5f9] disabled:text-[#94a3b8]"
               >
-                {locations.map((loc) => (
-                  <option key={loc.id} value={loc.id}>
-                    {loc.name}
-                  </option>
-                ))}
+                {isLoadingLocations ? (
+                  <option value="">Loading...</option>
+                ) : locations.length === 0 ? (
+                  <option value="">No locations found</option>
+                ) : (
+                  locations.map((loc) => (
+                    <option key={loc.id} value={loc.id}>
+                      {loc.name}
+                    </option>
+                  ))
+                )}
               </select>
             </div>
 
@@ -185,13 +264,20 @@ export function TransferStockModal({
                 required
                 value={targetLocId}
                 onChange={(e) => setTargetLocId(e.target.value)}
-                className="w-full rounded-lg border border-[#cbd5e1] px-3 py-2 text-sm text-[#0f172a] focus:border-[#2563eb] focus:outline-none focus:ring-1 focus:ring-[#2563eb]"
+                disabled={isLoadingLocations || isCreatingLocation || locations.length === 0}
+                className="w-full rounded-lg border border-[#cbd5e1] px-3 py-2 text-sm text-[#0f172a] focus:border-[#2563eb] focus:outline-none focus:ring-1 focus:ring-[#2563eb] disabled:bg-[#f1f5f9] disabled:text-[#94a3b8]"
               >
-                {locations.map((loc) => (
-                  <option key={loc.id} value={loc.id}>
-                    {loc.name}
-                  </option>
-                ))}
+                {isLoadingLocations ? (
+                  <option value="">Loading...</option>
+                ) : locations.length === 0 ? (
+                  <option value="">No locations found</option>
+                ) : (
+                  locations.map((loc) => (
+                    <option key={loc.id} value={loc.id}>
+                      {loc.name}
+                    </option>
+                  ))
+                )}
               </select>
             </div>
           </div>
@@ -227,7 +313,13 @@ export function TransferStockModal({
             <Button type="button" variant="outline" size="sm" onClick={onClose} disabled={isSubmitting}>
               Cancel
             </Button>
-            <Button type="submit" variant="primary" size="sm" isLoading={isSubmitting}>
+            <Button
+              type="submit"
+              variant="primary"
+              size="sm"
+              isLoading={isSubmitting}
+              disabled={isSubmitting || isLoadingLocations || isCreatingLocation || !sourceLocId || !targetLocId || locations.length < 2}
+            >
               Execute Transfer
             </Button>
           </div>

@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import { X, AlertCircle, SlidersHorizontal } from "lucide-react";
+import { X, AlertCircle, SlidersHorizontal, Plus } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { apiClient, ApiError } from "@/lib/api-client";
 
@@ -28,6 +28,9 @@ export function AdjustStockModal({
   const [quantity, setQuantity] = useState("1");
   const [reason, setReason] = useState("Cycle Count Reconciliation");
   const [locations, setLocations] = useState<Array<{ id: string; name: string }>>([]);
+  const [isLocationsLoaded, setIsLocationsLoaded] = useState(false);
+  const [isCreatingLocation, setIsCreatingLocation] = useState(false);
+  const isLoadingLocations = !isLocationsLoaded;
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
@@ -38,17 +41,67 @@ export function AdjustStockModal({
     if (initialLocationId) setLocationId(initialLocationId);
   }
 
+  const createDefaultWarehouse = async () => {
+    setIsCreatingLocation(true);
+    try {
+      const created = await apiClient<{ id: string; name: string }>("/locations", {
+        method: "POST",
+        body: JSON.stringify({
+          name: "Main Warehouse",
+          type: "Warehouse",
+          address: "Primary Facility",
+        }),
+      });
+      setLocations((prev) => (prev.some((l) => l.id === created.id) ? prev : [...prev, created]));
+      setLocationId(created.id);
+    } catch (err: unknown) {
+      if (err instanceof ApiError) {
+        setErrorMsg(`Failed to setup warehouse: ${err.message}`);
+      } else {
+        setErrorMsg("Failed to setup default warehouse location.");
+      }
+    } finally {
+      setIsCreatingLocation(false);
+    }
+  };
+
   useEffect(() => {
     if (!isOpen) return;
     let isCancelled = false;
     apiClient<Array<{ id: string; name: string }>>("/locations")
-      .then((res) => {
-        if (!isCancelled) {
+      .then(async (res) => {
+        if (isCancelled) return;
+        if (res && res.length > 0) {
           setLocations(res);
-          setLocationId((curr) => curr || (res[0] ? res[0].id : ""));
+          setLocationId((curr) => (curr && res.some((l) => l.id === curr) ? curr : res[0].id));
+        } else {
+          try {
+            const created = await apiClient<{ id: string; name: string }>("/locations", {
+              method: "POST",
+              body: JSON.stringify({
+                name: "Main Warehouse",
+                type: "Warehouse",
+                address: "Primary Facility",
+              }),
+            });
+            if (!isCancelled) {
+              setLocations([created]);
+              setLocationId(created.id);
+            }
+          } catch {
+            // Handled gracefully
+          }
         }
       })
-      .catch(() => {});
+      .catch((err) => {
+        console.error("Failed to load locations", err);
+      })
+      .finally(() => {
+        if (!isCancelled) {
+          setIsLocationsLoaded(true);
+        }
+      });
+
     return () => {
       isCancelled = true;
     };
@@ -150,21 +203,42 @@ export function AdjustStockModal({
           )}
 
           <div>
-            <label className="block text-xs font-semibold text-[#334155] uppercase tracking-wider mb-1.5">
-              Storage Location *
-            </label>
+            <div className="flex items-center justify-between mb-1.5">
+              <label className="block text-xs font-semibold text-[#334155] uppercase tracking-wider">
+                Storage Location *
+              </label>
+              {locations.length === 0 && !isLoadingLocations && (
+                <button
+                  type="button"
+                  onClick={createDefaultWarehouse}
+                  disabled={isCreatingLocation}
+                  className="inline-flex items-center gap-1 text-xs font-medium text-[#2563eb] hover:text-[#1d4ed8] underline disabled:opacity-50"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>{isCreatingLocation ? "Provisioning..." : "Add Main Warehouse"}</span>
+                </button>
+              )}
+            </div>
             <select
               required
               value={locationId}
               onChange={(e) => setLocationId(e.target.value)}
-              className="w-full rounded-lg border border-[#cbd5e1] px-3 py-2 text-sm text-[#0f172a] focus:border-[#2563eb] focus:outline-none focus:ring-1 focus:ring-[#2563eb]"
+              disabled={isLoadingLocations || isCreatingLocation || locations.length === 0}
+              className="w-full rounded-lg border border-[#cbd5e1] px-3 py-2 text-sm text-[#0f172a] focus:border-[#2563eb] focus:outline-none focus:ring-1 focus:ring-[#2563eb] disabled:bg-[#f1f5f9] disabled:text-[#94a3b8]"
             >
-              {locations.length === 0 && <option value="">Loading locations...</option>}
-              {locations.map((loc) => (
-                <option key={loc.id} value={loc.id}>
-                  {loc.name}
-                </option>
-              ))}
+              {isLoadingLocations ? (
+                <option value="">Loading locations...</option>
+              ) : isCreatingLocation ? (
+                <option value="">Setting up default warehouse...</option>
+              ) : locations.length === 0 ? (
+                <option value="">No warehouse found — click &quot;Add Main Warehouse&quot;</option>
+              ) : (
+                locations.map((loc) => (
+                  <option key={loc.id} value={loc.id}>
+                    {loc.name}
+                  </option>
+                ))
+              )}
             </select>
           </div>
 
@@ -215,7 +289,13 @@ export function AdjustStockModal({
             <Button type="button" variant="outline" size="sm" onClick={onClose} disabled={isSubmitting}>
               Cancel
             </Button>
-            <Button type="submit" variant="primary" size="sm" isLoading={isSubmitting}>
+            <Button
+              type="submit"
+              variant="primary"
+              size="sm"
+              isLoading={isSubmitting}
+              disabled={isSubmitting || isLoadingLocations || isCreatingLocation || !locationId}
+            >
               Confirm Adjustment
             </Button>
           </div>
