@@ -35,7 +35,7 @@ services:
       - key: ENCRYPTION_KEY
         generateValue: true
       - key: ALLOWED_ORIGINS
-        value: "https://mini-project-1-orpin.vercel.app,https://smart-inventory-frontend.onrender.com,http://localhost:3000"
+        value: "https://inventorymanage-orpin.vercel.app,https://mini-project-1-orpin.vercel.app,https://smart-inventory-frontend.onrender.com,http://localhost:3000"
 
   # --- Next.js Frontend Web Service ---
   - type: web

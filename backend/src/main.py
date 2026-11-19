@@ -74,10 +74,11 @@ def create_application() -> FastAPI:
         response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
         return response
 
-    # Register CORS Middleware with explicit production Vercel frontend origin
+    # Register CORS Middleware with explicit production Vercel frontend origins
     cors_allowed_origins = list(
         dict.fromkeys(
             [
+                "https://inventorymanage-orpin.vercel.app",
                 "https://mini-project-1-orpin.vercel.app",
                 *[o for o in settings.cors_origins if o != "*"],
             ]
@@ -87,10 +88,12 @@ def create_application() -> FastAPI:
     app.add_middleware(
         CORSMiddleware,
         allow_origins=cors_allowed_origins,
-        allow_origin_regex=r"^https:\/\/mini-project-1.*\.vercel\.app$",
+        allow_origin_regex=r"^https:\/\/(inventorymanage.*|mini-project-1.*)\.vercel\.app$",
         allow_credentials=True,
-        allow_methods=["*"],
+        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS", "HEAD"],
         allow_headers=["*"],
+        expose_headers=["Content-Length", "Content-Range", "X-Total-Count"],
+        max_age=86400,
     )
 
     # Register Standard Error Handlers (API.md format)

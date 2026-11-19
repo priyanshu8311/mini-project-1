@@ -2,10 +2,6 @@ import math
 from dataclasses import dataclass
 from datetime import date, timedelta
 
-# pyrefly: ignore[missing-import]
-import numpy as np
-from sklearn.linear_model import Ridge
-
 
 @dataclass
 class ForecastPoint:
@@ -28,145 +24,88 @@ class ForecastResult:
 
 
 class DemandForecaster:
-    """Time-series demand forecaster trained on historical data using Scikit-Learn."""
-
-    @staticmethod
-    def _build_feature_vector(
-        history_values: list[float],
-        target_date: date,
-        time_index: int,
-    ) -> list[float]:
-        """Extract tabular ML features from historical sequence up to target_date."""
-        # 1. Lag features
-        lag_1 = history_values[-1] if len(history_values) >= 1 else 0.0
-        lag_2 = history_values[-2] if len(history_values) >= 2 else lag_1
-        lag_7 = history_values[-7] if len(history_values) >= 7 else lag_1
-        lag_14 = history_values[-14] if len(history_values) >= 14 else lag_7
-
-        # 2. Rolling window statistics
-        w7 = history_values[-7:] if len(history_values) >= 7 else history_values
-        rolling_mean_7 = float(np.mean(w7)) if w7 else lag_1
-        rolling_std_7 = float(np.std(w7)) if len(w7) > 1 else 0.5
-
-        # 3. Calendar & Seasonality features
-        day_of_week = float(target_date.weekday())  # 0=Monday, 6=Sunday
-        is_weekend = 1.0 if target_date.weekday() in (4, 5) else 0.0  # Fri/Sat lift
-        day_of_month = float(target_date.day)
-
-        return [
-            lag_1,
-            lag_2,
-            lag_7,
-            lag_14,
-            rolling_mean_7,
-            rolling_std_7,
-            day_of_week,
-            is_weekend,
-            day_of_month,
-            float(time_index),
-        ]
+    """Time-series demand forecaster employing exponential smoothing, velocity estimation, and uncertainty intervals."""
 
     @staticmethod
     def forecast_sku_demand(
         daily_sales: dict[date, int],
         start_date: date,
         horizon_days: int = 30,
-        alpha: float = 1.0,
+        alpha: float = 0.3,
     ) -> ForecastResult:
-        """Train a Scikit-Learn regressor on daily sales and project future demand."""
-        sorted_dates = sorted(daily_sales.keys())
-        sales_values = [float(daily_sales[d]) for d in sorted_dates]
+        """Generate time-series demand predictions from historical sales.
 
-        # Cold-start fallback if zero or insufficient data
-        if not sales_values or len(sales_values) < 3:
-            baseline = 1.0
+        Args:
+            daily_sales: Mapping of historical date -> units sold.
+            start_date: First date of the forecasting horizon.
+            horizon_days: Number of days forward to project.
+            alpha: Exponential smoothing weight (0 < alpha <= 1).
+        """
+        sorted_dates = sorted(daily_sales.keys())
+        sales_values = [daily_sales[d] for d in sorted_dates]
+
+        if not sales_values:
+            # Cold-start baseline: 0 velocity
+            baseline = 1
             points = [
                 ForecastPoint(
                     forecast_date=start_date + timedelta(days=i),
-                    predicted_demand=int(baseline),
+                    predicted_demand=baseline,
                     confidence_lower=0,
-                    confidence_upper=int(baseline * 2),
+                    confidence_upper=baseline * 2,
                 )
                 for i in range(horizon_days)
             ]
-            return ForecastResult(
-                points=points,
-                daily_velocity=baseline,
-                std_dev=0.5,
-                mape=None,
-            )
+            return ForecastResult(points=points, daily_velocity=float(baseline), std_dev=0.5, mape=None)
 
-        # 1. Build Supervised Training Dataset (X, y)
-        X_train_list: list[list[float]] = []
-        y_train_list: list[float] = []
+        # 1. Simple Exponential Smoothing (Holt-Winters single smoothing)
+        smoothed = float(sales_values[0])
+        for val in sales_values[1:]:
+            smoothed = alpha * val + (1 - alpha) * smoothed
 
-        # Start from day index 1 so at least 1 lag exists
-        for idx in range(1, len(sales_values)):
-            curr_date = sorted_dates[idx]
-            sub_history = sales_values[:idx]
-            feat = DemandForecaster._build_feature_vector(
-                history_values=sub_history,
-                target_date=curr_date,
-                time_index=idx,
-            )
-            X_train_list.append(feat)
-            y_train_list.append(sales_values[idx])
+        # 2. Moving Average Velocity (last 14 or 30 days)
+        recent_window = sales_values[-30:] if len(sales_values) >= 30 else sales_values
+        avg_velocity = sum(recent_window) / len(recent_window)
+        # Combine smoothed estimate with average velocity
+        blended_velocity = max(0.1, (smoothed * 0.6) + (avg_velocity * 0.4))
 
-        X_train = np.array(X_train_list, dtype=np.float64)
-        y_train = np.array(y_train_list, dtype=np.float64)
+        # 3. Variance and Standard Deviation
+        variance = sum((x - avg_velocity) ** 2 for x in recent_window) / len(recent_window)
+        std_dev = math.sqrt(variance) if variance > 0 else max(0.5, blended_velocity * 0.25)
 
-        # 2. Fit Scikit-Learn Model
-        model = Ridge(alpha=alpha, positive=False)
-        model.fit(X_train, y_train)
-
-        # 3. Model Variance / Residual Error
-        train_preds = model.predict(X_train)
-        residuals = y_train - train_preds
-        variance = float(np.mean(residuals**2)) if len(residuals) > 0 else 1.0
-        std_dev = max(0.5, math.sqrt(variance))
-
-        # 4. Out-of-sample MAPE Validation (holdout test set if >= 14 points)
+        # 4. Out-of-sample MAPE calculation if enough points exist
         mape: float | None = None
         if len(sales_values) >= 14:
-            split_idx = len(sales_values) - 7
-            X_val_train, y_val_train = X_train[:split_idx], y_train[:split_idx]
-            X_val_test, y_val_test = X_train[split_idx:], y_train[split_idx:]
-            if len(X_val_train) >= 3 and len(X_val_test) > 0:
-                val_model = Ridge(alpha=alpha)
-                val_model.fit(X_val_train, y_val_train)
-                val_preds = val_model.predict(X_val_test)
-                errors = [
-                    abs(actual - pred) / actual
-                    for actual, pred in zip(y_val_test, val_preds, strict=False)
-                    if actual > 0
-                ]
+            train = sales_values[:-7]
+            test = sales_values[-7:]
+            if train:
+                train_smoothed = float(train[0])
+                for v in train[1:]:
+                    train_smoothed = alpha * v + (1 - alpha) * train_smoothed
+                errors = []
+                for actual in test:
+                    if actual > 0:
+                        errors.append(abs(actual - train_smoothed) / actual)
                 if errors:
-                    mape = round(float(np.mean(errors)) * 100, 2)
+                    mape = round((sum(errors) / len(errors)) * 100, 2)
 
-        # 5. Autoregressive Recursive Forecasting into Future
-        simulated_history = list(sales_values)
+        # 5. Project future horizon
+        # 80% confidence interval: z ≈ 1.28
+        # Standard error grows slightly with sqrt(time)
         points: list[ForecastPoint] = []
-        predicted_values: list[float] = []
-
-        start_time_idx = len(sales_values)
         for i in range(horizon_days):
             target_date = start_date + timedelta(days=i)
-            features = DemandForecaster._build_feature_vector(
-                history_values=simulated_history,
-                target_date=target_date,
-                time_index=start_time_idx + i,
-            )
-            X_step = np.array([features], dtype=np.float64)
-            step_pred = float(model.predict(X_step)[0])
-            step_pred = max(0.0, step_pred)  # Demand cannot be negative
+            # Factor in weekday / weekend seasonality pattern if available
+            day_of_week = target_date.weekday()
+            seasonality_multiplier = 1.15 if day_of_week in (4, 5) else 0.95  # Fri/Sat lift
 
-            # Uncertainty expands slightly further into the future
-            horizon_penalty = math.sqrt(1.0 + (i * 0.05))
-            interval = 1.28 * std_dev * horizon_penalty  # 80% confidence interval
+            daily_pred = max(0.0, blended_velocity * seasonality_multiplier)
+            horizon_factor = math.sqrt(1 + (i * 0.05))
+            interval = 1.28 * std_dev * horizon_factor
 
-            pred_int = int(round(step_pred))
-            lower_int = max(0, int(round(step_pred - interval)))
-            upper_int = int(round(step_pred + interval))
+            pred_int = int(round(daily_pred))
+            lower_int = max(0, int(round(daily_pred - interval)))
+            upper_int = int(round(daily_pred + interval))
 
             points.append(
                 ForecastPoint(
@@ -177,19 +116,9 @@ class DemandForecaster:
                 )
             )
 
-            # Append prediction to history for autoregressive lags in next step
-            predicted_values.append(step_pred)
-            simulated_history.append(step_pred)
-
-        daily_velocity = (
-            float(np.mean(predicted_values))
-            if predicted_values
-            else float(np.mean(sales_values[-14:]))
-        )
-
         return ForecastResult(
             points=points,
-            daily_velocity=round(daily_velocity, 2),
+            daily_velocity=round(blended_velocity, 2),
             std_dev=round(std_dev, 2),
             mape=mape,
         )

@@ -100,7 +100,7 @@ def _cors_headers(request: Request) -> dict[str, str]:
     origin = request.headers.get("origin")
     if origin and (
         origin in settings.cors_origins
-        or re.match(r"^https:\/\/mini-project-1.*\.vercel\.app$", origin)
+        or re.match(r"^https:\/\/(inventorymanage.*|mini-project-1.*)\.vercel\.app$", origin)
     ):
         return {
             "Access-Control-Allow-Origin": origin,

@@ -240,11 +240,12 @@ export async function apiClient<T>(
   }
 
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 10000);
+  const timeoutId = setTimeout(() => controller.abort(), 25000);
 
   let response: Response;
   try {
     response = await fetch(url, {
+      credentials: "include",
       signal: options.signal || controller.signal,
       ...options,
       headers,
@@ -254,6 +255,13 @@ export async function apiClient<T>(
       throw new ApiError(408, {
         code: "TIMEOUT",
         message: "Network request timed out. Please verify the backend service is running.",
+      });
+    }
+    if (err instanceof TypeError && err.message === "Failed to fetch") {
+      throw new ApiError(503, {
+        code: "NETWORK_ERROR",
+        message:
+          "Unable to connect to the backend server. The backend service may be spinning up from idle sleep or network access was interrupted. Please retry in a few moments.",
       });
     }
     throw err;
